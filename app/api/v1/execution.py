@@ -1,13 +1,18 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.users import UserRole
-from app.schemas.orders import RequestCreate, RequestResponse, WorkOrderResponse
+from app.api.deps import get_current_user
+from app.core.constants import RoleNames
+from app.core.database import get_db
+from app.models.users import User
+from app.schemas.orders import OrderResponse, RequestCreate, RequestResponse
 from app.services import orders as order_service
 from app.services import users as user_service
 from app.services.orders import (
     InvalidOrderState,
     NotOrderOwner,
     OrderNotFound,
+    StatusNotFound,
 )
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
@@ -20,40 +25,67 @@ router = APIRouter(prefix="/orders", tags=["Orders"])
 )
 async def create_request(
     payload: RequestCreate,
-    user_id: int,
-    # TODO: заменить на Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
 ):
-    request = order_service.create_request(user_id=user_id, data=payload)
+    try:
+        request = await order_service.create_request(
+            session,
+            user_id=current_user.id,
+            data=payload,
+        )
+    except StatusNotFound:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Statuses not seeded. Run seed.",
+        )
+    return request
+
+
+@router.get("/requests/{request_id}", response_model=RequestResponse)
+async def get_request(
+    request_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    request = await order_service.get_request(session, request_id)
+    if request is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Request not found",
+        )
     return request
 
 
 @router.post(
     "/requests/{request_id}/accept",
-    response_model=WorkOrderResponse,
+    response_model=OrderResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def accept_request(
     request_id: int,
-    worker_id: int,
-    # TODO: заменить на Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
 ):
-    worker = await user_service.get_user_by_id(worker_id)
+    role_name = current_user.role.name if current_user.role else None
+    if role_name != RoleNames.WORKER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only WORKER can accept requests",
+        )
+
+    worker = await user_service.get_worker_by_user_id(session, current_user.id)
     if worker is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="worker not found",
-        )
-
-    if worker.role != UserRole.WORKER:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="only WORKER can accept requests",
+            detail="Worker profile not found",
         )
 
     try:
-        work_order = order_service.accept_request(
+        order = await order_service.accept_request(
+            session,
             request_id=request_id,
-            worker_id=worker_id,
+            worker_id=worker.id,
         )
     except OrderNotFound:
         raise HTTPException(
@@ -65,23 +97,36 @@ async def accept_request(
             status_code=status.HTTP_409_CONFLICT,
             detail="Request is not in NEW state",
         )
+    except StatusNotFound:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Statuses not seeded. Run seed.",
+        )
 
-    return work_order
+    return order
 
 
 @router.post(
     "/work-orders/{work_order_id}/complete",
-    response_model=WorkOrderResponse,
+    response_model=OrderResponse,
 )
 async def complete_work_order(
     work_order_id: int,
-    worker_id: int,
-    # TODO: заменить на Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
 ):
+    worker = await user_service.get_worker_by_user_id(session, current_user.id)
+    if worker is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Current user is not a worker",
+        )
+
     try:
-        work_order = order_service.complete_work_order(
-            work_order_id=work_order_id,
-            worker_id=worker_id,
+        order = await order_service.complete_order(
+            session,
+            order_id=work_order_id,
+            worker_id=worker.id,
         )
     except OrderNotFound:
         raise HTTPException(
@@ -98,5 +143,10 @@ async def complete_work_order(
             status_code=status.HTTP_409_CONFLICT,
             detail="Request is not in ASSIGNED state",
         )
+    except StatusNotFound:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Statuses not seeded. Run seed.",
+        )
 
-    return work_order
+    return order

@@ -1,5 +1,17 @@
-from app.models.orders import OrderStatus, Request, WorkOrder
+from datetime import datetime, timezone
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.core.constants import StatusNames
+from app.models.orders import Order, Request, Status
 from app.schemas.orders import RequestCreate
+
+
+def utc_now() -> datetime:
+    """Naive UTC timestamp для колонок TIMESTAMP WITHOUT TIME ZONE."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class OrderNotFound(Exception):
@@ -14,84 +26,120 @@ class NotOrderOwner(Exception):
     ...
 
 
-# TODO: заменить на AsyncSession
-_requests: list[Request] = []
-_work_orders: list[WorkOrder] = []
-_next_request_id = 1
-_next_work_order_id = 1
+class StatusNotFound(Exception):
+    ...
 
 
-def create_request(*, user_id: int, data: RequestCreate) -> Request:
-    global _next_request_id
+async def get_status_by_name(session: AsyncSession, name: str) -> Status | None:
+    result = await session.execute(select(Status).where(Status.name == name))
+    return result.scalar_one_or_none()
+
+
+async def _require_status(session: AsyncSession, name: str) -> Status:
+    status = await get_status_by_name(session, name)
+    if status is None:
+        raise StatusNotFound(name)
+    return status
+
+
+async def create_request(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    data: RequestCreate,
+) -> Request:
+    status = await _require_status(session, StatusNames.NEW)
 
     request = Request(
-        request_id=_next_request_id,
         user_id=user_id,
+        status_id=status.id,
         street_id=data.street_id,
         house_number=data.house_number,
         problem_description=data.problem_description,
-        status=OrderStatus.NEW,
+        urgency_level=data.urgency_level,
+        longitude=data.longitude,
+        latitude=data.latitude,
+        arrival_at=data.arrival_at,
+        created_at=utc_now(),
     )
-    _requests.append(request)
-    _next_request_id += 1
-
+    session.add(request)
+    await session.commit()
+    await session.refresh(request, attribute_names=["status"])
     return request
 
 
-def get_request(request_id: int) -> Request | None:
-    for request in _requests:
-        if request.id == request_id:
-            return request
+async def get_request(session: AsyncSession, request_id: int) -> Request | None:
+    result = await session.execute(
+        select(Request)
+        .options(selectinload(Request.status))
+        .where(Request.id == request_id)
+    )
+    return result.scalar_one_or_none()
 
-    return None
 
-
-def accept_request(*, request_id: int, worker_id: int) -> WorkOrder:
-    global _next_work_order_id
-
-    request = get_request(request_id)
+async def accept_request(
+    session: AsyncSession,
+    *,
+    request_id: int,
+    worker_id: int,
+) -> Order:
+    request = await get_request(session, request_id)
     if request is None:
         raise OrderNotFound
 
-    if request.status != OrderStatus.NEW:
+    new_status = await _require_status(session, StatusNames.NEW)
+    if request.status_id != new_status.id:
         raise InvalidOrderState
 
-    work_order = WorkOrder(
-        work_order_id=_next_work_order_id,
+    assigned_status = await _require_status(session, StatusNames.ASSIGNED)
+
+    order = Order(
         request_id=request.id,
         worker_id=worker_id,
+        appointment_time=utc_now(),
     )
-    _work_orders.append(work_order)
-    _next_work_order_id += 1
+    session.add(order)
 
-    request.status = OrderStatus.ASSIGNED
+    # Транзакционные изменения: request -> ASSIGNED вместе с созданием order.
+    request.status_id = assigned_status.id
 
-    return work_order
-
-
-def get_work_order(work_order_id: int) -> WorkOrder | None:
-    for work_order in _work_orders:
-        if work_order.id == work_order_id:
-            return work_order
-
-    return None
+    await session.commit()
+    await session.refresh(order)
+    return order
 
 
-def complete_work_order(*, work_order_id: int, worker_id: int) -> WorkOrder:
-    work_order = get_work_order(work_order_id)
-    if work_order is None:
+async def get_order(session: AsyncSession, order_id: int) -> Order | None:
+    result = await session.execute(select(Order).where(Order.id == order_id))
+    return result.scalar_one_or_none()
+
+
+async def complete_order(
+    session: AsyncSession,
+    *,
+    order_id: int,
+    worker_id: int,
+) -> Order:
+    order = await get_order(session, order_id)
+    if order is None:
         raise OrderNotFound
 
-    if work_order.worker_id != worker_id:
+    if order.worker_id != worker_id:
         raise NotOrderOwner
 
-    request = get_request(work_order.request_id)
+    request = await get_request(session, order.request_id)
     if request is None:
         raise OrderNotFound
 
-    if request.status != OrderStatus.ASSIGNED:
+    assigned_status = await _require_status(session, StatusNames.ASSIGNED)
+    if request.status_id != assigned_status.id:
         raise InvalidOrderState
 
-    request.status = OrderStatus.DONE
+    done_status = await _require_status(session, StatusNames.DONE)
 
-    return work_order
+    # Транзакционно: order завершён + request -> DONE.
+    order.work_end_time = utc_now()
+    request.status_id = done_status.id
+
+    await session.commit()
+    await session.refresh(order)
+    return order
