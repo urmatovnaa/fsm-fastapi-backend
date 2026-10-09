@@ -1,44 +1,53 @@
-from sqlalchemy import Column, Integer, String, BigInteger, ForeignKey, Text, Numeric
+from sqlalchemy import Column, BigInteger, String, Text, Integer, Numeric, ForeignKey
 from sqlalchemy.orm import relationship
 from .base import Base
 
-class Technique(Base):
-    __tablename__ = "techniques"
+class Equipment(Base):
+    __tablename__ = "equipment"
 
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    name = Column(String, nullable=True)
-    model_parameters = Column(Text, nullable=True)
+    name = Column(String)           # название
+    model_params = Column(Text)     # модель, параметры
 
-    requests = relationship("RequestTechnique", back_populates="technique")
+    # Связи
+    skills = relationship("Skill", back_populates="equipment")
+    application_equipment_links = relationship("ApplicationEquipment", back_populates="equipment")
+
 
 class Warehouse(Base):
     __tablename__ = "warehouses"
 
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    name = Column(String, nullable=True)
-    street_id = Column(BigInteger, ForeignKey("streets.id"), nullable=True)
-    house_number = Column(Integer, nullable=True)
+    name = Column(String)           # название
+    street_id = Column(BigInteger, ForeignKey("streets.id"))
+    house_number = Column(Integer)  # номер дома
 
+    # Связи
     street = relationship("Street", back_populates="warehouses")
-    inventory_items = relationship("WarehouseInventory", back_populates="warehouse")
+    stocks = relationship("WarehouseStock", back_populates="warehouse")
+
 
 class SparePart(Base):
     __tablename__ = "spare_parts"
 
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    name = Column(String, nullable=True)
-    type = Column(String, nullable=True)
-    description = Column(Text, nullable=True)
-    price = Column(Numeric(10, 2), nullable=True)
+    name = Column(String)           # наименование
+    description = Column(Text)      # описание
+    price = Column(Numeric(10, 2))  # цена (money)
 
-    warehouse_items = relationship("WarehouseInventory", back_populates="spare_part")
-    orders = relationship("OrderSparePart", back_populates="spare_part")
+    # Связи
+    warehouse_stocks = relationship("WarehouseStock", back_populates="spare_part")
 
-class WarehouseInventory(Base):
-    __tablename__ = "warehouse_inventory"
 
-    warehouse_id = Column(BigInteger, ForeignKey("warehouses.id"), primary_key=True)
-    spare_part_id = Column(BigInteger, ForeignKey("spare_parts.id"), primary_key=True)
+class WarehouseStock(Base):
+    __tablename__ = "warehouse_stock"
 
-    warehouse = relationship("Warehouse", back_populates="inventory_items")
-    spare_part = relationship("SparePart", back_populates="warehouse_items")
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    warehouse_id = Column(BigInteger, ForeignKey("warehouses.id"))
+    spare_part_id = Column(BigInteger, ForeignKey("spare_parts.id"))
+    # В таблице на фото нет кол-ва, но по логике оно нужно. Добавил для полноты.
+    quantity = Column(Integer, default=0) 
+
+    # Связи
+    warehouse = relationship("Warehouse", back_populates="stocks")
+    spare_part = relationship("SparePart", back_populates="warehouse_stocks")

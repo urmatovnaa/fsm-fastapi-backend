@@ -1,6 +1,3 @@
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import declarative_base
 
-
-class Base(DeclarativeBase):
-    """Единый declarative base для всех ORM-моделей проекта."""
-    pass
+Base = declarative_base()
