@@ -1,57 +1,64 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.schemas.users import UserCreate, UserLogin, UserResponse, TokenResponse
+from app.api.deps import get_current_user
+from app.core.constants import RoleNames
+from app.core.database import get_db
+from app.core.security import create_access_token, verify_password
+from app.models.users import User
+from app.schemas.users import TokenResponse, UserCreate, UserLogin, UserResponse
 from app.services import users as user_service
-from app.core.security import (
-    hash_password,
-    verify_password,
-    create_access_token,
-)
+from app.services.users import RoleNotFound, UserAlreadyExists
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(payload: UserCreate):
-    existing = await user_service.get_user_by_username(payload.username)
-    if existing:
-        raise HTTPException(status_code=400, detail="Username already taken")
+async def register(payload: UserCreate, session: AsyncSession = Depends(get_db)):
+    role_name = (payload.role or RoleNames.USER).upper()
+    if role_name not in RoleNames.ALL:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown role: {payload.role}",
+        )
 
-    # TODO: хеширование (сейчас заглушка)
-    _ = hash_password(payload.password)
+    try:
+        user = await user_service.create_user(
+            session,
+            full_name=payload.full_name,
+            email=payload.email,
+            password=payload.password,
+            phone=payload.phone,
+            role_name=role_name,
+        )
+    except UserAlreadyExists:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered",
+        )
+    except RoleNotFound:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Role '{role_name}' not found. Run seed.",
+        )
 
-    user = await user_service.create_user(
-        username=payload.username,
-        password=payload.password,
-    )
-    return UserResponse(
-        id=user.id,
-        username=user.username,
-        role=user.role,
-        is_active=user.is_active,
-    )
+    return user
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(payload: UserLogin):
-    user = await user_service.get_user_by_username(payload.username)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+async def login(payload: UserLogin, session: AsyncSession = Depends(get_db)):
+    user = await user_service.get_user_by_email(session, payload.email)
+    if user is None or not verify_password(payload.password, user.password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
 
-    # TODO: verify_password(payload.password, user.hashed_password)
-    token = create_access_token(user_id=user.id, role=user.role.value)
+    role_name = user.role.name if user.role else RoleNames.USER
+    token = create_access_token(user_id=user.id, role=role_name)
     return TokenResponse(access_token=token, token_type="bearer")
 
 
 @router.get("/me", response_model=UserResponse)
-async def me(user_id: int = 1):
-    """Заглушка: вернёт пользователя по id (пока без JWT-зависимости)."""
-    user = await user_service.get_user_by_id(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return UserResponse(
-        id=user.id,
-        username=user.username,
-        role=user.role,
-        is_active=user.is_active,
-    )
+async def me(current_user: User = Depends(get_current_user)):
+    return current_user

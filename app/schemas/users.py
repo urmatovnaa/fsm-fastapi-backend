@@ -1,24 +1,38 @@
-from pydantic import BaseModel
-from app.models.users import UserRole
+from pydantic import BaseModel, ConfigDict, EmailStr
+
+
+class RoleResponse(BaseModel):
+    id: int
+    name: str
+    rights: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserCreate(BaseModel):
-    username: str
+    full_name: str
+    email: EmailStr
+    phone: str | None = None
     password: str
+    role: str = "USER"
 
 
 class UserLogin(BaseModel):
-    username: str
+    email: EmailStr
     password: str
 
 
 class UserResponse(BaseModel):
     id: int
-    username: str
-    role: UserRole
-    is_active: bool
+    full_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    role_id: int | None = None
+    role: RoleResponse | None = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TokenResponse(BaseModel):
     access_token: str
-    token_type: str
+    token_type: str = "bearer"
