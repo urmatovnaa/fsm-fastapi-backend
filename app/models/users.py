@@ -1,60 +1,52 @@
-from sqlalchemy import Column, Integer, String, BigInteger, ForeignKey, Text, Interval
+from sqlalchemy import Column, BigInteger, String, Boolean, Integer, ForeignKey
 from sqlalchemy.orm import relationship
 from .base import Base
-
-class Role(Base):
-    __tablename__ = "roles"
-
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    name = Column(String, nullable=False)
-    rights = Column(Text, nullable=True)
-
-    users = relationship("User", back_populates="role")
 
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    role_id = Column(BigInteger, ForeignKey("roles.id"), nullable=True)
-    full_name = Column(String, nullable=True)
-    email = Column(String, nullable=True)
+    id = Column(BigInteger, primary_key=True, index=True)
+    is_admin = Column(Boolean, default=False)
+    full_name = Column(String, nullable=False) # ФИО
+    email = Column(String, nullable=False, unique=True) # Корректировка 2: not null
     phone = Column(String, nullable=True)
-    password = Column(String, nullable=True)
+    password = Column(String, nullable=False)
 
-    role = relationship("Role", back_populates="users")
-    worker = relationship("Worker", back_populates="user", uselist=False)
-    requests = relationship("Request", back_populates="user")
+    # Связи
+    worker_profile = relationship("Worker", back_populates="user", uselist=False)
+
+class Brigade(Base):
+    __tablename__ = "brigades"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+
+    workers = relationship("Worker", back_populates="brigade")
 
 class Worker(Base):
     __tablename__ = "workers"
 
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
-    latitude = Column(Integer, nullable=True)
-    longitude = Column(Integer, nullable=True)
-    experience = Column(Integer, nullable=True)
+    id = Column(BigInteger, primary_key=True, index=True)
+    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False)
+    # Корректировка 3: id_бригады необязательно
+    brigade_id = Column(BigInteger, ForeignKey("brigades.id"), nullable=True) 
+    latitude = Column(Integer, nullable=True) # широта
+    longitude = Column(Integer, nullable=True) # долгота
+    experience = Column(Integer, nullable=True) # стаж работы
 
-    user = relationship("User", back_populates="worker")
-    schedules = relationship("Schedule", back_populates="worker")
+    # Связи
+    user = relationship("User", back_populates="worker_profile")
+    brigade = relationship("Brigade", back_populates="workers")
     skills = relationship("Skill", back_populates="worker")
+    schedules = relationship("Schedule", back_populates="worker")
     orders = relationship("Order", back_populates="worker")
-
-class Schedule(Base):
-    __tablename__ = "schedules"
-
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    worker_id = Column(BigInteger, ForeignKey("workers.id"), nullable=True)
-    day_of_week = Column(String, nullable=True)
-    working_hours = Column(Interval, nullable=True)
-
-    worker = relationship("Worker", back_populates="schedules")
 
 class Skill(Base):
     __tablename__ = "skills"
 
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    worker_id = Column(BigInteger, ForeignKey("workers.id"), nullable=True)
-    operation_id = Column(BigInteger, ForeignKey("operations.id"), nullable=True)
+    id = Column(BigInteger, primary_key=True, index=True)
+    worker_id = Column(BigInteger, ForeignKey("workers.id"), nullable=False)
+    technic_id = Column(BigInteger, ForeignKey("technics.id"), nullable=True) # Предполагаем связь с техникой
 
     worker = relationship("Worker", back_populates="skills")
-    operation = relationship("Operation", back_populates="skills")
+    technic = relationship("Technic") # Связь будет определена в inventory.py
