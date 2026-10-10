@@ -75,6 +75,7 @@ class Order(Base):
     id = Column(BigInteger, primary_key=True, index=True)
     request_id = Column(BigInteger, ForeignKey("requests.id"), nullable=False)
     worker_id = Column(BigInteger, ForeignKey("workers.id"), nullable=True)
+    brigade_id = Column(BigInteger, ForeignKey("brigades.id"), nullable=True)
     status_id = Column(BigInteger, ForeignKey("statuses.id"), nullable=True)
     priority = Column(Integer, nullable=True)
     
