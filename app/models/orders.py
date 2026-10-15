@@ -74,8 +74,6 @@ class Order(Base):
 
     id = Column(BigInteger, primary_key=True, index=True)
     request_id = Column(BigInteger, ForeignKey("requests.id"), nullable=False)
-    worker_id = Column(BigInteger, ForeignKey("workers.id"), nullable=True)
-    brigade_id = Column(BigInteger, ForeignKey("brigades.id"), nullable=True)
     status_id = Column(BigInteger, ForeignKey("statuses.id"), nullable=True)
     priority = Column(Integer, nullable=True)
     
@@ -91,10 +89,20 @@ class Order(Base):
 
     # Связи
     request = relationship("Request", back_populates="orders")
-    worker = relationship("Worker", back_populates="orders")
+    workers = relationship("OrderWorker", back_populates="order")
     status = relationship("Status", back_populates="orders")
     photos = relationship("OrderPhoto", back_populates="order")
     parts = relationship("OrderPart", back_populates="order")
+
+class OrderWorker(Base):
+    __tablename__ = "order_workers"
+
+    order_id = Column(BigInteger, ForeignKey("orders.id"), primary_key=True)
+    worker_id = Column(BigInteger, ForeignKey("workers.id"), primary_key=True)
+
+    order = relationship("Order", back_populates="workers")
+    worker = relationship("Worker", back_populates="orders")
+
 
 class OrderPart(Base):
     __tablename__ = "order_parts"
