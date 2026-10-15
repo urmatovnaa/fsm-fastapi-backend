@@ -38,6 +38,7 @@ class Request(Base):
     latitude = Column(Integer, nullable=True)
     longitude = Column(Integer, nullable=True)
     problem_description = Column(Text, nullable=True)
+    urgency = Column(Integer, nullable=True) 
 
     # Связи
     user = relationship("User")
