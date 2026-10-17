@@ -1,109 +1,127 @@
-from sqlalchemy import Column, BigInteger, String, Text, Integer, DateTime, Boolean, Numeric, ForeignKey
+from sqlalchemy import Column, BigInteger, String, Integer, Text, Numeric, DateTime, Date, Time, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from .base import Base
 
 class Status(Base):
     __tablename__ = "statuses"
 
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    name = Column(String)  # название
+    id = Column(BigInteger, primary_key=True, index=True)
+    name = Column(String, nullable=False)
 
-    # Связи
-    applications = relationship("Application", back_populates="status")
-
+    requests = relationship("Request", back_populates="status")
+    orders = relationship("Order", back_populates="status")
 
 class Street(Base):
     __tablename__ = "streets"
 
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    name = Column(String)  # название
+    id = Column(BigInteger, primary_key=True, index=True)
+    name = Column(String, nullable=False)
 
-    # Связи
-    applications = relationship("Application", back_populates="street")
+    requests = relationship("Request", back_populates="street")
     warehouses = relationship("Warehouse", back_populates="street")
 
+class Request(Base):
+    __tablename__ = "requests"
 
-class Application(Base):
-    __tablename__ = "applications"
-
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    user_id = Column(BigInteger, ForeignKey("users.id"))
-    status_id = Column(BigInteger, ForeignKey("statuses.id"))
-    created_at = Column(DateTime)               # дата, время создания
-    arrival_time = Column(DateTime, nullable=True) # дата, время приезда от пользователя
-    street_id = Column(BigInteger, ForeignKey("streets.id"))
-    house_number = Column(Integer)              # номер дома
-    longitude = Column(Integer)                 # долгота
-    latitude = Column(Integer)                  # широта
-    urgency_level = Column(Integer)             # уровень срочности
-    problem_description = Column(Text)          # описание проблемы
-    estimated_completion_time = Column(DateTime, nullable=True) # приближенное время выполнения
-    estimated_price = Column(Numeric(10, 2), nullable=True)     # приближенная цена
-
-    # Связи
-    user = relationship("User", back_populates="applications")
-    status = relationship("Status", back_populates="applications")
-    street = relationship("Street", back_populates="applications")
-    equipment_list = relationship("ApplicationEquipment", back_populates="application")
-    order = relationship("Order", back_populates="application", uselist=False)
-
-
-class ApplicationEquipment(Base):
-    """Связующая таблица: список техники на заявку"""
-    __tablename__ = "application_equipment"
-
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    application_id = Column(BigInteger, ForeignKey("applications.id"))
-    equipment_id = Column(BigInteger, ForeignKey("equipment.id"))
+    id = Column(BigInteger, primary_key=True, index=True)
+    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False)
+    status_id = Column(BigInteger, ForeignKey("statuses.id"), nullable=True)
+    created_at = Column(DateTime, nullable=False) # дата, время создания
+    visit_date = Column(Date, nullable=True) # дата от пользователя
+    visit_time_start = Column(Time, nullable=True) # время нч приезда
+    visit_time_end = Column(Time, nullable=True) 
+    
+    # Поля адреса (см. корректировку 8)
+    street_id = Column(BigInteger, ForeignKey("streets.id"), nullable=True)
+    house_number = Column(Integer, nullable=True)
+    
+    latitude = Column(Integer, nullable=True)
+    longitude = Column(Integer, nullable=True)
+    problem_description = Column(Text, nullable=True)
+    urgency = Column(Integer, nullable=True) 
 
     # Связи
-    application = relationship("Application", back_populates="equipment_list")
-    equipment = relationship("Equipment", back_populates="application_equipment_links")
+    user = relationship("User")
+    status = relationship("Status", back_populates="requests")
+    street = relationship("Street", back_populates="requests")
+    technics = relationship("RequestTechnic", back_populates="request")
+    orders = relationship("Order", back_populates="request")
 
+
+class RequestTechnic(Base):
+    __tablename__ = "request_technics"
+
+    request_id = Column(BigInteger, ForeignKey("requests.id"), primary_key=True)
+    technic_id = Column(BigInteger, ForeignKey("technics.id"), primary_key=True)
+
+    request = relationship("Request", back_populates="technics")
+    technic = relationship("Technic", back_populates="request_technics")
+
+class Schedule(Base):
+    __tablename__ = "schedules"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    worker_id = Column(BigInteger, ForeignKey("workers.id"), nullable=False)
+    start_time = Column(Time, nullable=False)
+    end_time = Column(Time, nullable=False)
+    # Корректировка 5: id_заказа необязательное
+    order_id = Column(BigInteger, ForeignKey("orders.id"), nullable=True)
+
+    worker = relationship("Worker", back_populates="schedules")
+    order = relationship("Order")
 
 class Order(Base):
     __tablename__ = "orders"
 
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    application_id = Column(BigInteger, ForeignKey("applications.id"))
-    worker_id = Column(BigInteger, ForeignKey("workers.id"))
-    appointment_time = Column(DateTime, nullable=True) # время назначения
-    start_time = Column(DateTime, nullable=True)       # время нч работы
-    end_time = Column(DateTime, nullable=True)         # время кц работы
-    checklist = Column(Text, nullable=True)            # чек-лист
-    work_description = Column(Text, nullable=True)     # описание выполненной работы
+    id = Column(BigInteger, primary_key=True, index=True)
+    request_id = Column(BigInteger, ForeignKey("requests.id"), nullable=False)
+    status_id = Column(BigInteger, ForeignKey("statuses.id"), nullable=True)
+    priority = Column(Integer, nullable=True)
+    
+    appointment_time = Column(DateTime, nullable=True)
+    work_start_time = Column(DateTime, nullable=True)
+    work_end_time = Column(DateTime, nullable=True)
+    
+    checklist = Column(Text, nullable=True)
+    work_description = Column(Text, nullable=True)
     total_amount = Column(Numeric(10, 2), nullable=True) # сумма
-    client_review = Column(Text, nullable=True)        # отзыв клиента
-    worker_review = Column(Text, nullable=True)        # отзыв работника
+    client_review = Column(Text, nullable=True)
+    worker_review = Column(Text, nullable=True)
 
     # Связи
-    application = relationship("Application", back_populates="order")
-    worker = relationship("Worker", back_populates="orders")
-    spare_parts_list = relationship("OrderSparePart", back_populates="order")
+    request = relationship("Request", back_populates="orders")
+    workers = relationship("OrderWorker", back_populates="order")
+    status = relationship("Status", back_populates="orders")
     photos = relationship("OrderPhoto", back_populates="order")
+    parts = relationship("OrderPart", back_populates="order")
+
+class OrderWorker(Base):
+    __tablename__ = "order_workers"
+
+    order_id = Column(BigInteger, ForeignKey("orders.id"), primary_key=True)
+    worker_id = Column(BigInteger, ForeignKey("workers.id"), primary_key=True)
+
+    order = relationship("Order", back_populates="workers")
+    worker = relationship("Worker", back_populates="orders")
 
 
-class OrderSparePart(Base):
-    """Связующая таблица: список запчастей на заказ"""
-    __tablename__ = "order_spare_parts"
+class OrderPart(Base):
+    __tablename__ = "order_parts"
 
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    order_id = Column(BigInteger, ForeignKey("orders.id"))
-    spare_part_id = Column(BigInteger, ForeignKey("spare_parts.id"))
-    quantity = Column(Integer)  # кол-во
+    id = Column(BigInteger, primary_key=True, index=True)
+    order_id = Column(BigInteger, ForeignKey("orders.id"), nullable=False)
+    spare_part_id = Column(BigInteger, ForeignKey("spare_parts.id"), nullable=True)
+    quantity = Column(Integer, nullable=False) # кол-во
 
-    # Связи
-    order = relationship("Order", back_populates="spare_parts_list")
-    spare_part = relationship("SparePart") # Можно добавить back_populates, если нужно
-
+    order = relationship("Order", back_populates="parts")
+    spare_part = relationship("SparePart", back_populates="order_parts")
 
 class OrderPhoto(Base):
     __tablename__ = "order_photos"
 
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    order_id = Column(BigInteger, ForeignKey("orders.id"))
-    photo_url = Column(Text)    # фото (ссылка)
-    photo_type = Column(Boolean) # тип фото (до/после) - bool: True = после, False = до
+    id = Column(BigInteger, primary_key=True, index=True)
+    order_id = Column(BigInteger, ForeignKey("orders.id"), nullable=False)
+    photo_url = Column(Text, nullable=False) # фото
+    photo_type = Column(Boolean, nullable=True) # тип фото (до/после)
 
-    # Связи
     order = relationship("Order", back_populates="photos")
