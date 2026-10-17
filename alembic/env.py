@@ -8,8 +8,10 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 from app.core.config import settings
-from app.core.database import Base
-import app.models  
+from app.models.base import Base
+
+# Импорт всех моделей, чтобы они попали в Base.metadata
+import app.models  # noqa: F401
 
 # Alembic Config
 config = context.config
@@ -46,9 +48,7 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     """Онлайн асинхронные миграции"""
-    # Создаем конфиг-секцию
     configuration = config.get_section(config.config_ini_section, {})
-    # Подставляем URL из settings напрямую
     configuration["sqlalchemy.url"] = settings.DATABASE_URL
 
     connectable = async_engine_from_config(

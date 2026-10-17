@@ -23,3 +23,6 @@ __pycache__/
 # Временные файлы системы
 .DS_Store
 Thumbs.db
+
+t.py
+t.txt
