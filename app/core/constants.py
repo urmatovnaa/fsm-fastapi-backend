@@ -1,12 +1,8 @@
-"""Согласованные имена ролей и статусов (хранятся в БД как записи)."""
+"""Согласованные имена статусов заявок/нарядов.
 
-
-class RoleNames:
-    ADMIN = "ADMIN"
-    WORKER = "WORKER"
-    USER = "USER"
-
-    ALL = (ADMIN, WORKER, USER)
+Роли вынесены из структуры: административность пользователя хранится
+флагом `User.is_admin` (см. app/models/users.py).
+"""
 
 
 class StatusNames:

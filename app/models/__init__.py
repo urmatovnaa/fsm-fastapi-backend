@@ -5,46 +5,44 @@
 """
 
 from app.models.base import Base
-from app.models.users import Role, User, Worker, Schedule, Skill
+from app.models.users import User, Worker, Skill
 from app.models.orders import (
     Status,
     Street,
-    Operation,
     Request,
-    RequestTechnique,
-    RequestOperation,
+    RequestTechnic,
+    Schedule,
     Order,
+    OrderWorker,
+    OrderPart,
     OrderPhoto,
-    OrderSparePart,
 )
 from app.models.inventory import (
-    Technique,
-    Warehouse,
+    Technic,
     SparePart,
-    WarehouseInventory,
+    Warehouse,
+    WarehouseStock,
 )
 
 __all__ = [
     "Base",
     # users
-    "Role",
     "User",
     "Worker",
-    "Schedule",
     "Skill",
     # orders
     "Status",
     "Street",
-    "Operation",
     "Request",
-    "RequestTechnique",
-    "RequestOperation",
+    "RequestTechnic",
+    "Schedule",
     "Order",
+    "OrderWorker",
+    "OrderPart",
     "OrderPhoto",
-    "OrderSparePart",
     # inventory
-    "Technique",
-    "Warehouse",
+    "Technic",
     "SparePart",
-    "WarehouseInventory",
+    "Warehouse",
+    "WarehouseStock",
 ]

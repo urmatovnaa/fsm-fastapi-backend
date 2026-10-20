@@ -1,12 +1,4 @@
-from pydantic import BaseModel, ConfigDict, EmailStr
-
-
-class RoleResponse(BaseModel):
-    id: int
-    name: str
-    rights: str | None = None
-
-    model_config = ConfigDict(from_attributes=True)
+from pydantic import BaseModel, ConfigDict, EmailStr, model_validator
 
 
 class UserCreate(BaseModel):
@@ -14,7 +6,14 @@ class UserCreate(BaseModel):
     email: EmailStr
     phone: str | None = None
     password: str
-    role: str = "USER"
+    password_confirmation: str
+    is_admin: bool = False
+
+    @model_validator(mode="after")
+    def validate_passwords_match(self) -> "UserCreate":
+        if self.password != self.password_confirmation:
+            raise ValueError("Passwords do not match")
+        return self
 
 
 class UserLogin(BaseModel):
@@ -24,11 +23,10 @@ class UserLogin(BaseModel):
 
 class UserResponse(BaseModel):
     id: int
-    full_name: str | None = None
-    email: str | None = None
+    full_name: str
+    email: EmailStr
     phone: str | None = None
-    role_id: int | None = None
-    role: RoleResponse | None = None
+    is_admin: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

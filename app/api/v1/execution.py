@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
-from app.core.constants import RoleNames
 from app.core.database import get_db
 from app.models.users import User
 from app.schemas.orders import OrderResponse, RequestCreate, RequestResponse
@@ -42,6 +41,14 @@ async def create_request(
     return request
 
 
+@router.get("/requests", response_model=list[RequestResponse])
+async def list_requests(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    return await order_service.list_requests(session)
+
+
 @router.get("/requests/{request_id}", response_model=RequestResponse)
 async def get_request(
     request_id: int,
@@ -67,18 +74,11 @@ async def accept_request(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    role_name = current_user.role.name if current_user.role else None
-    if role_name != RoleNames.WORKER:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only WORKER can accept requests",
-        )
-
     worker = await user_service.get_worker_by_user_id(session, current_user.id)
     if worker is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Worker profile not found",
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Current user has no worker profile",
         )
 
     try:
@@ -104,6 +104,20 @@ async def accept_request(
         )
 
     return order
+
+
+@router.get("/work-orders", response_model=list[OrderResponse])
+async def list_work_orders(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    worker = await user_service.get_worker_by_user_id(session, current_user.id)
+    if worker is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Current user has no worker profile",
+        )
+    return await order_service.list_orders(session, worker_id=worker.id)
 
 
 @router.post(

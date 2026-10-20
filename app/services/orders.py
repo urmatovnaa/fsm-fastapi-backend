@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.constants import StatusNames
-from app.models.orders import Order, Request, Status
+from app.models.orders import Order, OrderWorker, Request, Status
 from app.schemas.orders import RequestCreate
 
 
@@ -55,11 +55,13 @@ async def create_request(
         status_id=status.id,
         street_id=data.street_id,
         house_number=data.house_number,
-        problem_description=data.problem_description,
-        urgency_level=data.urgency_level,
-        longitude=data.longitude,
         latitude=data.latitude,
-        arrival_at=data.arrival_at,
+        longitude=data.longitude,
+        problem_description=data.problem_description,
+        urgency=data.urgency,
+        visit_date=data.visit_date,
+        visit_time_start=data.visit_time_start,
+        visit_time_end=data.visit_time_end,
         created_at=utc_now(),
     )
     session.add(request)
@@ -75,6 +77,43 @@ async def get_request(session: AsyncSession, request_id: int) -> Request | None:
         .where(Request.id == request_id)
     )
     return result.scalar_one_or_none()
+
+
+async def list_requests(session: AsyncSession) -> list[Request]:
+    result = await session.execute(
+        select(Request).options(selectinload(Request.status)).order_by(Request.id)
+    )
+    return list(result.scalars().all())
+
+
+async def get_order(session: AsyncSession, order_id: int) -> Order | None:
+    result = await session.execute(
+        select(Order).options(selectinload(Order.status)).where(Order.id == order_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_orders(session: AsyncSession, *, worker_id: int) -> list[Order]:
+    result = await session.execute(
+        select(Order)
+        .join(OrderWorker, OrderWorker.order_id == Order.id)
+        .options(selectinload(Order.status))
+        .where(OrderWorker.worker_id == worker_id)
+        .order_by(Order.id)
+    )
+    return list(result.scalars().all())
+
+
+async def _is_order_worker(
+    session: AsyncSession, *, order_id: int, worker_id: int
+) -> bool:
+    result = await session.execute(
+        select(OrderWorker).where(
+            OrderWorker.order_id == order_id,
+            OrderWorker.worker_id == worker_id,
+        )
+    )
+    return result.scalar_one_or_none() is not None
 
 
 async def accept_request(
@@ -95,22 +134,19 @@ async def accept_request(
 
     order = Order(
         request_id=request.id,
-        worker_id=worker_id,
+        status_id=assigned_status.id,
         appointment_time=utc_now(),
     )
     session.add(order)
+    await session.flush()
 
-    # Транзакционные изменения: request -> ASSIGNED вместе с созданием order.
+    # Назначение мастера на наряд + перевод заявки в ASSIGNED — транзакционно.
+    session.add(OrderWorker(order_id=order.id, worker_id=worker_id))
     request.status_id = assigned_status.id
 
     await session.commit()
-    await session.refresh(order)
+    await session.refresh(order, attribute_names=["status"])
     return order
-
-
-async def get_order(session: AsyncSession, order_id: int) -> Order | None:
-    result = await session.execute(select(Order).where(Order.id == order_id))
-    return result.scalar_one_or_none()
 
 
 async def complete_order(
@@ -123,7 +159,7 @@ async def complete_order(
     if order is None:
         raise OrderNotFound
 
-    if order.worker_id != worker_id:
+    if not await _is_order_worker(session, order_id=order_id, worker_id=worker_id):
         raise NotOrderOwner
 
     request = await get_request(session, order.request_id)
@@ -136,10 +172,11 @@ async def complete_order(
 
     done_status = await _require_status(session, StatusNames.DONE)
 
-    # Транзакционно: order завершён + request -> DONE.
+    # Транзакционно: наряд завершён + заявка -> DONE.
     order.work_end_time = utc_now()
+    order.status_id = done_status.id
     request.status_id = done_status.id
 
     await session.commit()
-    await session.refresh(order)
+    await session.refresh(order, attribute_names=["status"])
     return order

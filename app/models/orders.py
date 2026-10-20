@@ -41,7 +41,7 @@ class Request(Base):
     urgency = Column(Integer, nullable=True) 
 
     # Связи
-    user = relationship("User")
+    user = relationship("User", back_populates="requests")
     status = relationship("Status", back_populates="requests")
     street = relationship("Street", back_populates="requests")
     technics = relationship("RequestTechnic", back_populates="request")

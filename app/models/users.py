@@ -14,6 +14,7 @@ class User(Base):
 
     # Связи
     worker_profile = relationship("Worker", back_populates="user", uselist=False)
+    requests = relationship("Request", back_populates="user")
 
 class Worker(Base):
     __tablename__ = "workers"
@@ -38,4 +39,4 @@ class Skill(Base):
     technic_id = Column(BigInteger, ForeignKey("technics.id"), nullable=True) # Предполагаем связь с техникой
 
     worker = relationship("Worker", back_populates="skills")
-    technic = relationship("Technic") # Связь будет определена в inventory.py
+    technic = relationship("Technic", back_populates="skills")
