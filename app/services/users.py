@@ -1,5 +1,6 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.security import hash_password
 from app.models.users import User, Worker
@@ -22,6 +23,14 @@ async def get_user_by_email(session: AsyncSession, email: str) -> User | None:
 async def get_worker_by_user_id(session: AsyncSession, user_id: int) -> Worker | None:
     result = await session.execute(select(Worker).where(Worker.user_id == user_id))
     return result.scalar_one_or_none()
+
+
+async def list_users(session: AsyncSession) -> list[User]:
+    """Все пользователи с предзагруженным профилем мастера (для админа)."""
+    result = await session.execute(
+        select(User).options(selectinload(User.worker_profile)).order_by(User.id)
+    )
+    return list(result.scalars().all())
 
 
 async def create_user(

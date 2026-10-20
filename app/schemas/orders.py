@@ -53,6 +53,7 @@ class OrderResponse(BaseModel):
     id: int
     request_id: int
     status_id: int | None = None
+    status: StatusResponse | None = None
     priority: int | None = None
     appointment_time: datetime | None = None
     work_start_time: datetime | None = None

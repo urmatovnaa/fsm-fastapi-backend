@@ -153,7 +153,7 @@ async def run_flow() -> None:
         )
         assert r.status_code == 201, ("create request", r.status_code, r.text)
         request_id = r.json()["id"]
-        assert r.json()["status"]["name"] == "NEW"
+        assert r.json()["status"]["name"] == "SEARCHING_MASTER"
         assert r.json()["urgency"] == 2
 
         # 10. Admin-only: создание техники. Клиент -> 403.
@@ -203,15 +203,15 @@ async def run_flow() -> None:
             session.add(Worker(user_id=wk_user.id))
             await session.commit()
 
-        # 14. Воркер принимает заявку -> создаётся order со статусом ASSIGNED
+        # 14. Воркер принимает заявку -> создаётся order со статусом ACCEPTED
         r = await client.post(
             f"/api/v1/orders/requests/{request_id}/accept", headers=worker_headers
         )
         assert r.status_code == 201, ("accept request", r.status_code, r.text)
         order_id = r.json()["id"]
-        assert r.json()["status_id"] == 2  # ASSIGNED
+        assert r.json()["status"]["name"] == "ACCEPTED"
 
-        # 15. Повторный accept -> 409 (уже не NEW)
+        # 15. Повторный accept -> 409 (уже есть активный заказ)
         r = await client.post(
             f"/api/v1/orders/requests/{request_id}/accept", headers=worker_headers
         )
@@ -222,19 +222,46 @@ async def run_flow() -> None:
         assert r.status_code == 200, ("list work orders", r.status_code, r.text)
         assert any(o["id"] == order_id for o in r.json())
 
-        # 17. Завершение наряда воркером -> request DONE
+        # 16b. Недопустимый переход: complete из ACCEPTED -> 409
+        r = await client.post(
+            f"/api/v1/orders/work-orders/{order_id}/complete", headers=worker_headers
+        )
+        assert r.status_code == 409, ("invalid complete", r.status_code, r.text)
+
+        # 16c. ACCEPTED -> EN_ROUTE
+        r = await client.post(
+            f"/api/v1/orders/work-orders/{order_id}/en-route", headers=worker_headers
+        )
+        assert r.status_code == 200, ("en route", r.status_code, r.text)
+        assert r.json()["status"]["name"] == "EN_ROUTE"
+
+        # 16d. EN_ROUTE -> IN_PROGRESS
+        r = await client.post(
+            f"/api/v1/orders/work-orders/{order_id}/start", headers=worker_headers
+        )
+        assert r.status_code == 200, ("start work", r.status_code, r.text)
+        assert r.json()["status"]["name"] == "IN_PROGRESS"
+
+        # 17. Завершение наряда воркером -> order COMPLETED, request COMPLETED
         r = await client.post(
             f"/api/v1/orders/work-orders/{order_id}/complete", headers=worker_headers
         )
         assert r.status_code == 200, ("complete order", r.status_code, r.text)
         assert r.json()["work_end_time"] is not None
+        assert r.json()["status"]["name"] == "COMPLETED"
 
-        # 18. Статус заявки теперь DONE
+        # 18. Статус заявки теперь COMPLETED
         r = await client.get(
             f"/api/v1/orders/requests/{request_id}", headers=user_headers
         )
         assert r.status_code == 200, ("get request", r.status_code, r.text)
-        assert r.json()["status"]["name"] == "DONE"
+        assert r.json()["status"]["name"] == "COMPLETED"
+
+        # 18b. Терминальный заказ: повторный complete -> 409
+        r = await client.post(
+            f"/api/v1/orders/work-orders/{order_id}/complete", headers=worker_headers
+        )
+        assert r.status_code == 409, ("terminal complete", r.status_code, r.text)
 
         # 19. Планирование (защищённый модуль)
         r = await client.get("/api/v1/planning/health", headers=user_headers)

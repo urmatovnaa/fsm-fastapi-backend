@@ -13,8 +13,30 @@ from app.schemas.inventory import (
     TechnicResponse,
     WarehouseResponse,
 )
+from app.schemas.users import AdminUserResponse
+from app.services import users as user_service
 
 router = APIRouter(prefix="/control", tags=["Control"])
+
+
+@router.get("/users", response_model=list[AdminUserResponse])
+async def list_users(
+    current_user: User = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    """Список всех пользователей (user/worker/admin). Только для админа."""
+    users = await user_service.list_users(session)
+    return [
+        AdminUserResponse(
+            id=u.id,
+            full_name=u.full_name,
+            email=u.email,
+            phone=u.phone,
+            is_admin=bool(u.is_admin),
+            worker_id=u.worker_profile.id if u.worker_profile else None,
+        )
+        for u in users
+    ]
 
 
 @router.get("/technics", response_model=list[TechnicResponse])
