@@ -3,9 +3,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.core.database import get_db
+from app.core.tags import TAG_WORKER
 from app.models.users import User
 
-router = APIRouter(prefix="/planning", tags=["Planning"])
+router = APIRouter(prefix="/planning", tags=[TAG_WORKER])
 
 
 @router.get("/health")

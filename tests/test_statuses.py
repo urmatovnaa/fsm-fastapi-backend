@@ -189,6 +189,11 @@ async def _request_status(client, headers, request_id: int) -> str:
 async def _scenario_happy_path(client, user_h, worker_h) -> None:
     request_id = await _create_request(client, user_h)
 
+    # До создания заказа заявка остаётся в SEARCHING_MASTER.
+    assert await _request_status(client, user_h, request_id) == (
+        RequestStatuses.SEARCHING_MASTER
+    )
+
     r = await client.post(
         f"/api/v1/orders/requests/{request_id}/accept", headers=worker_h
     )
@@ -196,9 +201,9 @@ async def _scenario_happy_path(client, user_h, worker_h) -> None:
     assert r.json()["status"]["name"] == OrderStatuses.ACCEPTED
     order_id = r.json()["id"]
 
-    # Заявка ещё в поиске мастера, пока заказ активен.
+    # Ключевое правило: заявка сразу COMPLETED после создания заказа.
     assert await _request_status(client, user_h, request_id) == (
-        RequestStatuses.SEARCHING_MASTER
+        RequestStatuses.COMPLETED
     )
 
     # Повторный accept -> 409 (активный заказ уже есть).
@@ -265,17 +270,16 @@ async def _scenario_not_completed_and_reuse(client, user_h, worker_h) -> None:
     assert r.status_code == 200, ("not completed", r.status_code, r.text)
     assert r.json()["status"]["name"] == OrderStatuses.NOT_COMPLETED
 
-    # Заявка остаётся в поиске мастера — можно создать новый заказ.
+    # Заявка остаётся COMPLETED (этап поиска уже завершён), но новый заказ
+    # по ней создать нельзя: заявка вышла из SEARCHING_MASTER.
     assert await _request_status(client, user_h, request_id) == (
-        RequestStatuses.SEARCHING_MASTER
+        RequestStatuses.COMPLETED
     )
 
     r = await client.post(
         f"/api/v1/orders/requests/{request_id}/accept", headers=worker_h
     )
-    assert r.status_code == 201, ("re-accept after not completed", r.status_code, r.text)
-    assert r.json()["status"]["name"] == OrderStatuses.ACCEPTED
-    assert r.json()["id"] != first_order_id
+    assert r.status_code == 409, ("re-accept not allowed", r.status_code, r.text)
 
 
 async def _scenario_order_cancel(client, user_h, worker_h) -> None:
@@ -293,8 +297,9 @@ async def _scenario_order_cancel(client, user_h, worker_h) -> None:
     assert r.status_code == 200, ("cancel order", r.status_code, r.text)
     assert r.json()["status"]["name"] == OrderStatuses.CANCELLED
 
+    # Заявка не откатывается в SEARCHING_MASTER автоматически.
     assert await _request_status(client, user_h, request_id) == (
-        RequestStatuses.SEARCHING_MASTER
+        RequestStatuses.COMPLETED
     )
 
 

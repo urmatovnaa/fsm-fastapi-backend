@@ -4,12 +4,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.core.security import create_access_token, verify_password
+from app.core.tags import TAG_AUTH
 from app.models.users import User
 from app.schemas.users import TokenResponse, UserCreate, UserLogin, UserResponse
 from app.services import users as user_service
 from app.services.users import UserAlreadyExists
 
-router = APIRouter(prefix="/auth", tags=["Auth"])
+router = APIRouter(prefix="/auth", tags=[TAG_AUTH])
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)

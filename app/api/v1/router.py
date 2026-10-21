@@ -1,10 +1,13 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, control, execution, planning
+from app.api.v1 import auth, control, planning, user, worker
 
 api_router = APIRouter()
 
-api_router.include_router(auth.router)
-api_router.include_router(execution.router)
+# Порядок включения соответствует логике ролей: клиент -> мастер ->
+# администратор -> служебные модули -> аутентификация.
+api_router.include_router(user.router)
+api_router.include_router(worker.router)
 api_router.include_router(control.router)
 api_router.include_router(planning.router)
+api_router.include_router(auth.router)

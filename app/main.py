@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from app.api.v1.router import api_router
 from app.core.database import AsyncSessionLocal
+from app.core.tags import OPENAPI_TAGS
 from app.services.seed import seed_all
 
 logger = logging.getLogger("masterflow")
@@ -25,9 +26,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="MasterFlow API",
-    description="Система управления выездным сервисом и распределения заказов",
+    description=(
+        "Система управления выездным сервисом и распределения заказов.\n\n"
+        "Endpoints сгруппированы по ролям: **User / Client**, "
+        "**Worker / Master**, **Admin**, а также **Auth**. Группировка — "
+        "визуальная; реальные проверки прав выполняются сервером."
+    ),
     version="1.0.0",
     lifespan=lifespan,
+    openapi_tags=OPENAPI_TAGS,
 )
 
 app.include_router(api_router, prefix="/api/v1")

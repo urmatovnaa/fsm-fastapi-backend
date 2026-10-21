@@ -116,6 +116,11 @@ class OrderPart(Base):
     order = relationship("Order", back_populates="parts")
     spare_part = relationship("SparePart", back_populates="order_parts")
 
+    @property
+    def spare_part_name(self) -> str | None:
+        """Наименование запчасти (для API-ответов; не изменяет схему БД)."""
+        return self.spare_part.name if self.spare_part else None
+
 class OrderPhoto(Base):
     __tablename__ = "order_photos"
 
