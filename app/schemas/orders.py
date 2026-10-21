@@ -1,7 +1,7 @@
 from datetime import date, datetime, time
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class StatusResponse(BaseModel):
@@ -160,5 +160,61 @@ class OrderResponse(BaseModel):
     # Проверка/результат работы.
     parts: list[OrderPartResponse] = []
     photos: list[OrderPhotoResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# Административные схемы: заявки, наряды и отзывы
+# ---------------------------------------------------------------------------
+class AdminRequestUser(BaseModel):
+    """Пользователь, создавший заявку (без чувствительных данных)."""
+
+    id: int
+    full_name: str
+    email: EmailStr
+    phone: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminWorkerRef(BaseModel):
+    """Назначенный работник (для отображения в наряде)."""
+
+    id: int
+    user_id: int
+    full_name: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminOrderResponse(OrderResponse):
+    """Наряд с раскрытыми назначенными работниками."""
+
+    workers: list[AdminWorkerRef] = []
+
+
+class AdminRequestDetailResponse(RequestResponse):
+    """Полная карточка заявки для администратора.
+
+    Содержит владельца заявки, статус, адрес/координаты, описание, срочность,
+    связанные наряды и назначенных работников.
+    """
+
+    user: AdminRequestUser | None = None
+    orders: list[AdminOrderResponse] = []
+
+
+class ReviewResponse(BaseModel):
+    """Отзыв клиента по наряду (``Order.client_review``)."""
+
+    order_id: int
+    request_id: int
+    user_id: int | None = None
+    user_full_name: str | None = None
+    client_review: str
+    total_amount: Decimal | None = None
+    work_description: str | None = None
+    work_end_time: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)

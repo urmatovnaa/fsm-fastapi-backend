@@ -20,6 +20,7 @@ from app.models.orders import (
     Request,
     Status,
 )
+from app.models.users import Worker
 from app.schemas.orders import OrderPartCreate, OrderPhotoCreate, RequestCreate
 
 # Терминальные статусы заказа: заказ больше не активен.
@@ -637,3 +638,162 @@ async def add_client_review(
     order.client_review = review
     await session.commit()
     return await get_order(session, order.id)
+
+
+# ---------------------------------------------------------------------------
+# Административный просмотр заявок, нарядов и отзывов
+# ---------------------------------------------------------------------------
+def _admin_order_options():
+    """Связи наряда для административного просмотра (включая работников)."""
+    return (
+        selectinload(Order.status),
+        selectinload(Order.request).selectinload(Request.status),
+        selectinload(Order.request).selectinload(Request.user),
+        selectinload(Order.parts).selectinload(OrderPart.spare_part),
+        selectinload(Order.photos),
+        selectinload(Order.workers)
+        .selectinload(OrderWorker.worker)
+        .selectinload(Worker.user),
+    )
+
+
+def _admin_request_options():
+    """Связи заявки для административного просмотра (владелец + наряды).
+
+    Наряды заявки предзагружаются полностью (статус, запрос, запчасти,
+    фотографии, назначенные работники), чтобы сериализация не вызывала
+    lazy-load в async-контексте.
+    """
+    return (
+        selectinload(Request.status),
+        selectinload(Request.user),
+        selectinload(Request.orders).selectinload(Order.status),
+        selectinload(Request.orders)
+        .selectinload(Order.request)
+        .selectinload(Request.status),
+        selectinload(Request.orders)
+        .selectinload(Order.parts)
+        .selectinload(OrderPart.spare_part),
+        selectinload(Request.orders).selectinload(Order.photos),
+        selectinload(Request.orders)
+        .selectinload(Order.workers)
+        .selectinload(OrderWorker.worker)
+        .selectinload(Worker.user),
+    )
+
+
+async def list_admin_requests(
+    session: AsyncSession,
+    *,
+    status: str | None = None,
+    user_id: int | None = None,
+    worker_id: int | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[Request]:
+    """Список заявок для администратора с фильтрами и пагинацией.
+
+    * ``status`` — имя статуса из справочника ``Status``;
+    * ``user_id`` — отбор заявок указанного пользователя;
+    * ``worker_id`` — отбор заявок, связанных с нарядами этого работника.
+
+    Фильтры комбинируются. Сортировка предсказуемая — по возрастанию ``id``.
+    """
+    stmt = select(Request).options(*_admin_request_options())
+
+    if status is not None:
+        stmt = stmt.join(Status, Status.id == Request.status_id).where(
+            Status.name == status
+        )
+    if user_id is not None:
+        stmt = stmt.where(Request.user_id == user_id)
+    if worker_id is not None:
+        stmt = stmt.join(Order, Order.request_id == Request.id).join(
+            OrderWorker, OrderWorker.order_id == Order.id
+        ).where(OrderWorker.worker_id == worker_id)
+
+    stmt = stmt.order_by(Request.id).limit(limit).offset(offset)
+    result = await session.execute(stmt)
+    return list(result.scalars().unique().all())
+
+
+async def get_admin_request(
+    session: AsyncSession, request_id: int
+) -> Request | None:
+    """Полная заявка для администратора (без ограничений владения)."""
+    result = await session.execute(
+        select(Request)
+        .options(*_admin_request_options())
+        .where(Request.id == request_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_admin_orders(
+    session: AsyncSession,
+    *,
+    worker_id: int | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[Order]:
+    """Список нарядов для администратора с фильтрами и пагинацией."""
+    stmt = select(Order).options(*_admin_order_options())
+    if worker_id is not None:
+        stmt = stmt.join(OrderWorker, OrderWorker.order_id == Order.id).where(
+            OrderWorker.worker_id == worker_id
+        )
+    if status is not None:
+        stmt = stmt.join(Status, Status.id == Order.status_id).where(
+            Status.name == status
+        )
+    stmt = stmt.order_by(Order.id).limit(limit).offset(offset)
+    result = await session.execute(stmt)
+    return list(result.scalars().unique().all())
+
+
+async def get_admin_order(session: AsyncSession, order_id: int) -> Order | None:
+    """Наряд для администратора со всеми связанными данными."""
+    result = await session.execute(
+        select(Order).options(*_admin_order_options()).where(Order.id == order_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_reviews(
+    session: AsyncSession,
+    *,
+    user_id: int | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[Order]:
+    """Заказы с оставленными отзывами (``client_review`` не пуст).
+
+    Заказы без отзыва в выборку не попадают. Сортировка — по ``id``.
+    """
+    stmt = (
+        select(Order)
+        .options(*_admin_order_options())
+        .where(Order.client_review.is_not(None), Order.client_review != "")
+    )
+    if user_id is not None:
+        stmt = stmt.join(Request, Request.id == Order.request_id).where(
+            Request.user_id == user_id
+        )
+    stmt = stmt.order_by(Order.id).limit(limit).offset(offset)
+    result = await session.execute(stmt)
+    return list(result.scalars().unique().all())
+
+
+async def get_review(session: AsyncSession, order_id: int) -> Order | None:
+    """Отзыв по конкретному заказу (``None``, если отзыва нет)."""
+    result = await session.execute(
+        select(Order)
+        .options(*_admin_order_options())
+        .where(
+            Order.id == order_id,
+            Order.client_review.is_not(None),
+            Order.client_review != "",
+        )
+    )
+    return result.scalar_one_or_none()
