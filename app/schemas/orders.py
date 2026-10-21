@@ -218,3 +218,54 @@ class ReviewResponse(BaseModel):
     work_end_time: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# Административные схемы: смена статуса заявки и работника заказа
+# ---------------------------------------------------------------------------
+class RequestStatusUpdate(BaseModel):
+    """Смена статуса заявки администратором.
+
+    Статус выбирается из существующего справочника ``Status``: можно передать
+    ``status_id`` (ID записи) или ``status_name`` (имя, например ``CANCELED``).
+    Новая система статусов не создаётся — используется существующая модель.
+    """
+
+    status_id: int | None = None
+    status_name: str | None = None
+
+
+class NotificationResponse(BaseModel):
+    """Уведомление о смене статуса заявки.
+
+    Реальная система уведомлений не подключена: уведомление формируется как
+    JSON-ответ и не сохраняется в БД (отдельная таблица не создаётся).
+    """
+
+    type: str
+    user_id: int
+    request_id: int
+    message: str
+
+
+class AdminRequestStatusResponse(AdminRequestDetailResponse):
+    """Результат смены статуса заявки для администратора."""
+
+    # Уведомление пользователю заполняется при переводе заявки в CANCELED.
+    notification: NotificationResponse | None = None
+
+
+class OrderWorkerChange(BaseModel):
+    """Назначение/замена работника, привязанного к наряду.
+
+    Используется существующая связь ``OrderWorker`` — новая таблица и поле не
+    создаются. Если ``replace_existing`` истинно, текущие работники наряда
+    заменяются; иначе работник добавляется дополнительно.
+    """
+
+    worker_id: int
+    replace_existing: bool = True
+
+
+class OrderWorkerResponse(AdminOrderResponse):
+    """Результат изменения работников наряда для администратора."""

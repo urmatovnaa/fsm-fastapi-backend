@@ -58,6 +58,14 @@ class SparePartNotFound(Exception):
     ...
 
 
+class WorkerNotFound(Exception):
+    """Работник, который должен быть назначен на наряд, не найден."""
+
+
+class NotOrderWorker(Exception):
+    """Указанный работник не привязан к наряду."""
+
+
 # ---------------------------------------------------------------------------
 # Eager loading: избегаем lazy-load в async-контексте и N+1.
 # ---------------------------------------------------------------------------
@@ -797,3 +805,179 @@ async def get_review(session: AsyncSession, order_id: int) -> Order | None:
         )
     )
     return result.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# Административное управление статусом заявки и работниками наряда
+# ---------------------------------------------------------------------------
+# Имена, которыми в проекте обозначается отмена заявки. ``CANCELED`` (одна L)
+# принимается наравне с каноническим ``CANCELLED`` — структура БД не меняется,
+# соответствующая запись берётся из существующей таблицы ``statuses``.
+_REQUEST_CANCEL_NAMES = frozenset(
+    {RequestStatuses.CANCELLED, "CANCELED"}
+)
+_REQUEST_CANCELED_NOTIFICATION = "REQUEST_CANCELED"
+
+
+async def list_statuses(session: AsyncSession) -> list[Status]:
+    """Существующий справочник статусов (для выбора администратором)."""
+    result = await session.execute(select(Status).order_by(Status.id))
+    return list(result.scalars().all())
+
+
+async def _resolve_status(
+    session: AsyncSession,
+    *,
+    status_id: int | None,
+    status_name: str | None,
+) -> Status:
+    """Находит запись статуса по ID или имени в существующем справочнике.
+
+    Дополнительно поддерживает алиас ``CANCELED`` -> ``CANCELLED`` и обратное,
+    чтобы существующая система статусов оставалась единой.
+    """
+    status: Status | None = None
+    if status_id is not None:
+        status = await session.get(Status, status_id)
+    elif status_name is not None:
+        status = await get_status_by_name(session, status_name)
+        if status is None and status_name in _REQUEST_CANCEL_NAMES:
+            # Пробуем альтернативное написание отмены.
+            for candidate in _REQUEST_CANCEL_NAMES:
+                status = await get_status_by_name(session, candidate)
+                if status is not None:
+                    break
+    if status is None:
+        raise StatusNotFound(status_id if status_id is not None else status_name)
+    return status
+
+
+async def admin_set_request_status(
+    session: AsyncSession,
+    *,
+    request_id: int,
+    status_id: int | None = None,
+    status_name: str | None = None,
+) -> tuple[Request, dict | None]:
+    """Администратор вручную задаёт существующий статус заявки.
+
+    Проверяются существование заявки и указанного статуса. При переводе заявки
+    в статус отмены формируется уведомление владельцу. Отдельная таблица
+    уведомлений не создаётся — уведомление возвращается как данные.
+
+    Возвращает пару ``(request, notification | None)``.
+    """
+    request = await get_admin_request(session, request_id)
+    if request is None:
+        raise OrderNotFound("Request not found")
+
+    if status_id is None and status_name is None:
+        raise InvalidOrderState("status_id or status_name is required")
+
+    status = await _resolve_status(
+        session, status_id=status_id, status_name=status_name
+    )
+
+    request.status_id = status.id
+    # Синхронизируем загруженную связь, чтобы ответ отражал новый статус.
+    request.status = status
+    await session.commit()
+
+    # Перезагружаем с административными связями (владелец + наряды + работники),
+    # чтобы сериализация не вызывала lazy-load в async-контексте.
+    updated = await get_admin_request(session, request_id)
+
+    notification: dict | None = None
+    if status.name in _REQUEST_CANCEL_NAMES:
+        notification = {
+            "type": _REQUEST_CANCELED_NOTIFICATION,
+            "user_id": updated.user_id,
+            "request_id": updated.id,
+            "message": "Ваша заявка была отменена администратором.",
+        }
+
+    return updated, notification
+
+
+async def list_order_workers(
+    session: AsyncSession, order_id: int
+) -> list[OrderWorker]:
+    """Текущие назначения (OrderWorker) конкретного наряда."""
+    result = await session.execute(
+        select(OrderWorker).where(OrderWorker.order_id == order_id)
+    )
+    return list(result.scalars().all())
+
+
+async def change_order_worker(
+    session: AsyncSession,
+    *,
+    order_id: int,
+    worker_id: int,
+    replace_existing: bool = True,
+) -> Order:
+    """Назначает/заменяет работника наряда через существующую связь OrderWorker.
+
+    * проверяются существование наряда и работника;
+    * при ``replace_existing`` текущие назначения удаляются (замена);
+    * связанные данные (расписание) не затрагиваются — изменение касается только
+      связи работник–наряд, что сохраняет существующую бизнес-логику.
+
+    Новая таблица и отдельное поле для работника не создаются.
+    """
+    order = await get_order(session, order_id)
+    if order is None:
+        raise OrderNotFound("Order not found")
+
+    worker = await session.get(Worker, worker_id)
+    if worker is None:
+        raise WorkerNotFound(worker_id)
+
+    existing = await list_order_workers(session, order_id)
+    already = {ow.worker_id for ow in existing}
+
+    if replace_existing:
+        # Замена: убираем прочих, целевого оставляем/добавляем.
+        for ow in existing:
+            if ow.worker_id != worker_id:
+                await session.delete(ow)
+        if worker_id not in already:
+            session.add(OrderWorker(order_id=order_id, worker_id=worker_id))
+    elif worker_id not in already:
+        # Добавление второго работника без удаления текущих.
+        session.add(OrderWorker(order_id=order_id, worker_id=worker_id))
+
+    await session.commit()
+    # Перезагружаем с административными связями (включая работников), чтобы
+    # сериализация ответа не вызывала lazy-load в async-контексте.
+    return await get_admin_order(session, order_id)
+
+
+async def remove_order_worker(
+    session: AsyncSession,
+    *,
+    order_id: int,
+    worker_id: int,
+) -> Order:
+    """Удаляет работника из наряда (существующая связь OrderWorker).
+
+    Несуществующее назначение -> ``NotOrderWorker``. Расписание и прочие
+    связанные данные не изменяются.
+    """
+    order = await get_order(session, order_id)
+    if order is None:
+        raise OrderNotFound("Order not found")
+
+    result = await session.execute(
+        select(OrderWorker).where(
+            OrderWorker.order_id == order_id,
+            OrderWorker.worker_id == worker_id,
+        )
+    )
+    link = result.scalar_one_or_none()
+    if link is None:
+        raise NotOrderWorker(worker_id)
+
+    await session.delete(link)
+    await session.commit()
+    return await get_admin_order(session, order_id)

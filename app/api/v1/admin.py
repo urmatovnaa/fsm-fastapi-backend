@@ -16,7 +16,7 @@ from app.api.deps import get_current_admin
 from app.core.database import get_db
 from app.core.tags import TAG_ADMIN
 from app.models.inventory import Warehouse, WarehouseStock
-from app.models.orders import Order, Request
+from app.models.orders import Order, Request, Status
 from app.models.users import User, Worker
 from app.schemas.inventory import (
     SparePartCreate,
@@ -35,11 +35,17 @@ from app.schemas.inventory import (
 from app.schemas.orders import (
     AdminOrderResponse,
     AdminRequestDetailResponse,
+    AdminRequestStatusResponse,
     AdminRequestUser,
     AdminWorkerRef,
+    NotificationResponse,
     OrderResponse,
+    OrderWorkerChange,
+    OrderWorkerResponse,
     RequestResponse,
+    RequestStatusUpdate,
     ReviewResponse,
+    StatusResponse,
 )
 from app.schemas.users import (
     AdminUserDetailResponse,
@@ -59,6 +65,13 @@ from app.schemas.users import (
 from app.services import catalog as catalog_service
 from app.services import orders as order_service
 from app.services import users as user_service
+from app.services.orders import (
+    InvalidOrderState,
+    NotOrderWorker,
+    OrderNotFound,
+    StatusNotFound,
+)
+from app.services.orders import WorkerNotFound as OrderWorkerNotFound
 from app.services.catalog import (
     InvalidQuantity,
     SparePartNotFound,
@@ -565,6 +578,65 @@ async def get_request(
     return _serialize_admin_request(request)
 
 
+@router.patch(
+    "/requests/{request_id}/status",
+    response_model=AdminRequestStatusResponse,
+    summary="Изменить статус заявки",
+)
+async def change_request_status(
+    request_id: int,
+    payload: RequestStatusUpdate,
+    current_user: User = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    """Администратор вручную задаёт существующий статус заявки.
+
+    Статус выбирается из справочника ``Status`` (``status_id`` или
+    ``status_name``). Новая система статусов не создаётся. При переводе заявки
+    в статус отмены (``CANCELLED``/``CANCELED``) формируется уведомление
+    владельцу — оно возвращается в поле ``notification`` (реальная система
+    уведомлений не подключена, отдельная таблица не создаётся).
+
+    Несуществующая заявка или статус -> 404; отсутствие параметров статуса ->
+    409.
+    """
+    try:
+        request, notification = await order_service.admin_set_request_status(
+            session,
+            request_id=request_id,
+            status_id=payload.status_id,
+            status_name=payload.status_name,
+        )
+    except OrderNotFound:
+        raise _not_found("Request not found")
+    except StatusNotFound:
+        raise _not_found("Status not found")
+    except InvalidOrderState:
+        raise _conflict("status_id or status_name is required")
+
+    base = _serialize_admin_request(request)
+    return AdminRequestStatusResponse(
+        **base.model_dump(),
+        notification=(
+            NotificationResponse(**notification) if notification else None
+        ),
+    )
+
+
+@router.get(
+    "/statuses",
+    response_model=list[StatusResponse],
+    summary="Справочник статусов",
+)
+async def list_statuses(
+    current_user: User = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    """Существующий справочник статусов заявок/нарядов для выбора админом."""
+    statuses = await order_service.list_statuses(session)
+    return [StatusResponse.model_validate(s) for s in statuses]
+
+
 # ---------------------------------------------------------------------------
 # Наряды и контроль выполнения
 # ---------------------------------------------------------------------------
@@ -610,6 +682,64 @@ async def get_order(
     order = await order_service.get_admin_order(session, order_id)
     if order is None:
         raise _not_found("Order not found")
+    return _serialize_admin_order(order)
+
+
+@router.put(
+    "/orders/{order_id}/worker",
+    response_model=OrderWorkerResponse,
+    summary="Назначить/заменить работника наряда",
+)
+async def change_order_worker(
+    order_id: int,
+    payload: OrderWorkerChange,
+    current_user: User = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    """Назначает или заменяет работника, привязанного к наряду.
+
+    Используется существующая связь ``OrderWorker`` (новая таблица/поле не
+    создаются). При ``replace_existing=true`` текущие работники наряда
+    заменяются указанным; при ``false`` работник добавляется дополнительно.
+    Расписание и прочие связанные данные не изменяются.
+    """
+    try:
+        order = await order_service.change_order_worker(
+            session,
+            order_id=order_id,
+            worker_id=payload.worker_id,
+            replace_existing=payload.replace_existing,
+        )
+    except OrderNotFound:
+        raise _not_found("Order not found")
+    except OrderWorkerNotFound:
+        raise _not_found("Worker not found")
+    return _serialize_admin_order(order)
+
+
+@router.delete(
+    "/orders/{order_id}/worker/{worker_id}",
+    response_model=OrderWorkerResponse,
+    summary="Удалить работника из наряда",
+)
+async def remove_order_worker(
+    order_id: int,
+    worker_id: int,
+    current_user: User = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    """Удаляет работника из наряда (существующая связь ``OrderWorker``).
+
+    Несуществующий наряд -> 404; работник не привязан к наряду -> 404.
+    """
+    try:
+        order = await order_service.remove_order_worker(
+            session, order_id=order_id, worker_id=worker_id
+        )
+    except OrderNotFound:
+        raise _not_found("Order not found")
+    except NotOrderWorker:
+        raise _not_found("Worker is not assigned to this order")
     return _serialize_admin_order(order)
 
 

@@ -608,6 +608,172 @@ async def _scenario_catalogs(client, admin_h) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Смена статуса заявки и работника наряда
+# ---------------------------------------------------------------------------
+async def _scenario_status_and_worker(
+    client,
+    admin_h,
+    owner_h,
+    worker_h,
+    worker_id: int,
+    other_email: str,
+) -> None:
+    # --- Справочник статусов ---
+    r = await client.get("/api/v1/control/statuses", headers=admin_h)
+    assert r.status_code == 200, ("statuses", r.status_code, r.text)
+    statuses = {s["name"]: s["id"] for s in r.json()}
+    assert RequestStatuses.SEARCHING_MASTER in statuses
+    assert RequestStatuses.CANCELLED in statuses
+
+    # --- Смена статуса заявки ---
+    r = await client.post(
+        "/api/v1/orders/requests",
+        headers=owner_h,
+        json={"problem_description": "status admin", "house_number": 7},
+    )
+    assert r.status_code == 201, ("create request", r.status_code, r.text)
+    request_id = r.json()["id"]
+    owner_id = r.json()["user_id"]
+
+    # Установка того же статуса — без уведомления.
+    r = await client.patch(
+        f"/api/v1/control/requests/{request_id}/status",
+        headers=admin_h,
+        json={"status_name": RequestStatuses.SEARCHING_MASTER},
+    )
+    assert r.status_code == 200, ("set same status", r.status_code, r.text)
+    assert r.json()["status"]["name"] == RequestStatuses.SEARCHING_MASTER
+    assert r.json()["notification"] is None
+
+    # Установка статуса отмены по алиасу CANCELED -> формируется уведомление.
+    r = await client.patch(
+        f"/api/v1/control/requests/{request_id}/status",
+        headers=admin_h,
+        json={"status_name": "CANCELED"},
+    )
+    assert r.status_code == 200, ("cancel status", r.status_code, r.text)
+    body = r.json()
+    assert body["status"]["name"] == RequestStatuses.CANCELLED
+    note = body["notification"]
+    assert note is not None, ("notification missing", body)
+    assert note["type"] == "REQUEST_CANCELED"
+    assert note["user_id"] == owner_id
+    assert note["request_id"] == request_id
+    assert note["message"]
+
+    # Смена статуса по status_id также работает (существующий справочник).
+    r = await client.patch(
+        f"/api/v1/control/requests/{request_id}/status",
+        headers=admin_h,
+        json={"status_id": statuses[RequestStatuses.COMPLETED]},
+    )
+    assert r.status_code == 200, ("set by id", r.status_code, r.text)
+    assert r.json()["status"]["name"] == RequestStatuses.COMPLETED
+    assert r.json()["notification"] is None
+
+    # Несуществующая заявка -> 404.
+    r = await client.patch(
+        "/api/v1/control/requests/99999999/status",
+        headers=admin_h,
+        json={"status_name": RequestStatuses.CANCELLED},
+    )
+    assert r.status_code == 404, ("missing request", r.status_code, r.text)
+
+    # Несуществующий статус -> 404.
+    r = await client.patch(
+        f"/api/v1/control/requests/{request_id}/status",
+        headers=admin_h,
+        json={"status_name": "NO_SUCH_STATUS"},
+    )
+    assert r.status_code == 404, ("missing status", r.status_code, r.text)
+
+    # Отсутствие параметров статуса -> 409.
+    r = await client.patch(
+        f"/api/v1/control/requests/{request_id}/status",
+        headers=admin_h,
+        json={},
+    )
+    assert r.status_code == 409, ("no status params", r.status_code, r.text)
+
+    # --- Смена работника наряда ---
+    r = await client.post(
+        "/api/v1/orders/requests",
+        headers=owner_h,
+        json={"problem_description": "worker change", "house_number": 8},
+    )
+    assert r.status_code == 201, ("create request", r.status_code, r.text)
+    order_request = r.json()["id"]
+    r = await client.post(
+        f"/api/v1/orders/requests/{order_request}/accept", headers=worker_h
+    )
+    assert r.status_code == 201, ("accept", r.status_code, r.text)
+    order_id = r.json()["id"]
+
+    # Второй работник.
+    worker2_id = await _make_worker(other_email)
+    assert worker2_id != worker_id
+
+    # Замена работника: остаётся только новый.
+    r = await client.put(
+        f"/api/v1/control/orders/{order_id}/worker",
+        headers=admin_h,
+        json={"worker_id": worker2_id, "replace_existing": True},
+    )
+    assert r.status_code == 200, ("replace worker", r.status_code, r.text)
+    ids = {w["id"] for w in r.json()["workers"]}
+    assert ids == {worker2_id}, ("replace result", r.text)
+
+    # Добавление второго работника без замены.
+    r = await client.put(
+        f"/api/v1/control/orders/{order_id}/worker",
+        headers=admin_h,
+        json={"worker_id": worker_id, "replace_existing": False},
+    )
+    assert r.status_code == 200, ("add worker", r.status_code, r.text)
+    ids = {w["id"] for w in r.json()["workers"]}
+    assert ids == {worker_id, worker2_id}, ("add result", r.text)
+
+    # Повторное добавление того же работника не создаёт дубликат.
+    r = await client.put(
+        f"/api/v1/control/orders/{order_id}/worker",
+        headers=admin_h,
+        json={"worker_id": worker_id, "replace_existing": False},
+    )
+    assert r.status_code == 200
+    assert len(r.json()["workers"]) == 2
+
+    # Удаление работника из наряда.
+    r = await client.delete(
+        f"/api/v1/control/orders/{order_id}/worker/{worker2_id}", headers=admin_h
+    )
+    assert r.status_code == 200, ("remove worker", r.status_code, r.text)
+    ids = {w["id"] for w in r.json()["workers"]}
+    assert ids == {worker_id}, ("remove result", r.text)
+
+    # Повторное удаление отсутствующего назначения -> 404.
+    r = await client.delete(
+        f"/api/v1/control/orders/{order_id}/worker/{worker2_id}", headers=admin_h
+    )
+    assert r.status_code == 404, ("re-remove worker", r.status_code, r.text)
+
+    # Несуществующий работник -> 404.
+    r = await client.put(
+        f"/api/v1/control/orders/{order_id}/worker",
+        headers=admin_h,
+        json={"worker_id": 99999999},
+    )
+    assert r.status_code == 404, ("missing worker", r.status_code, r.text)
+
+    # Несуществующий наряд -> 404.
+    r = await client.put(
+        "/api/v1/control/orders/99999999/worker",
+        headers=admin_h,
+        json={"worker_id": worker_id},
+    )
+    assert r.status_code == 404, ("missing order", r.status_code, r.text)
+
+
+# ---------------------------------------------------------------------------
 # Swagger
 # ---------------------------------------------------------------------------
 async def _scenario_swagger() -> None:
@@ -661,6 +827,14 @@ async def run_admin_flow() -> None:
         await _scenario_workers(client, admin_h, technic_id)
         await _scenario_requests_orders(
             client, admin_h, owner_h, owner_id, worker_h, worker_id
+        )
+        await _scenario_status_and_worker(
+            client,
+            admin_h,
+            owner_h,
+            worker_h,
+            worker_id,
+            other_email,
         )
         await _scenario_swagger()
 
