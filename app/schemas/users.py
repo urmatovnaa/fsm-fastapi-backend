@@ -170,7 +170,7 @@ class WorkerSummary(BaseModel):
 
 
 class WorkerOrderInfo(BaseModel):
-    """Наряд работника с раскрытым статусом."""
+    """Заказ работника с раскрытым статусом."""
 
     id: int
     request_id: int
@@ -182,7 +182,7 @@ class WorkerOrderInfo(BaseModel):
 
 
 class WorkerDetailResponse(BaseModel):
-    """Полная карточка работника с навыками, расписанием и нарядами."""
+    """Полная карточка работника с навыками, расписанием и заказами."""
 
     id: int
     user_id: int

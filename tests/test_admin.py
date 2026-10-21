@@ -7,7 +7,7 @@
 * создание работника с новым пользователем и откат при конфликте email;
 * управление навыками и расписанием работника;
 * фильтрация заявок по статусу, пользователю и работнику (и комбинации);
-* полная информация о заявке/наряде, назначенные работники и отчёт;
+* полная информация о заявке/заказе, назначенные работники и отчёт;
 * CRUD справочников (техника, запчасти, склады) и складских остатков;
 * просмотр отзывов (заказы без отзыва исключены);
 * сохранение ролевой группировки Swagger.
@@ -293,7 +293,7 @@ async def _scenario_workers(client, admin_h, technic_id: int) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Заявки, наряды, отзывы
+# Заявки, заказы, отзывы
 # ---------------------------------------------------------------------------
 async def _create_completed_reviewed(
     client, owner_h, worker_h
@@ -410,7 +410,7 @@ async def _scenario_requests_orders(
     r = await client.get("/api/v1/control/requests/99999999", headers=admin_h)
     assert r.status_code == 404, ("missing request", r.status_code, r.text)
 
-    # Наряд: отчёт, стоимость, работники, статус.
+    # Заказ: отчёт, стоимость, работники, статус.
     r = await client.get(f"/api/v1/control/orders/{order_id}", headers=admin_h)
     assert r.status_code == 200, ("order detail", r.status_code, r.text)
     order = r.json()
@@ -418,7 +418,7 @@ async def _scenario_requests_orders(
     assert order["work_description"] == "done well"
     assert any(w["id"] == worker_id for w in order["workers"])
 
-    # Отсутствующий наряд -> 404.
+    # Отсутствующий заказ -> 404.
     r = await client.get("/api/v1/control/orders/99999999", headers=admin_h)
     assert r.status_code == 404, ("missing order", r.status_code, r.text)
 
@@ -437,12 +437,12 @@ async def _scenario_requests_orders(
     assert r.status_code == 200
     assert all(x["user_id"] == owner_id for x in r.json())
 
-    # Отзыв по ID наряда.
+    # Отзыв по ID заказа.
     r = await client.get(f"/api/v1/control/reviews/{order_id}", headers=admin_h)
     assert r.status_code == 200
     assert r.json()["client_review"] == "Excellent service"
 
-    # Наряд без отзыва -> 404.
+    # Заказ без отзыва -> 404.
     r = await client.post(
         "/api/v1/orders/requests",
         headers=owner_h,
@@ -608,7 +608,7 @@ async def _scenario_catalogs(client, admin_h) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Смена статуса заявки и работника наряда
+# Смена статуса заявки и работника заказа
 # ---------------------------------------------------------------------------
 async def _scenario_status_and_worker(
     client,
@@ -695,7 +695,7 @@ async def _scenario_status_and_worker(
     )
     assert r.status_code == 409, ("no status params", r.status_code, r.text)
 
-    # --- Смена работника наряда ---
+    # --- Смена работника заказа ---
     r = await client.post(
         "/api/v1/orders/requests",
         headers=owner_h,
@@ -742,7 +742,7 @@ async def _scenario_status_and_worker(
     assert r.status_code == 200
     assert len(r.json()["workers"]) == 2
 
-    # Удаление работника из наряда.
+    # Удаление работника из заказа.
     r = await client.delete(
         f"/api/v1/control/orders/{order_id}/worker/{worker2_id}", headers=admin_h
     )
@@ -764,7 +764,7 @@ async def _scenario_status_and_worker(
     )
     assert r.status_code == 404, ("missing worker", r.status_code, r.text)
 
-    # Несуществующий наряд -> 404.
+    # Несуществующий заказ -> 404.
     r = await client.put(
         "/api/v1/control/orders/99999999/worker",
         headers=admin_h,

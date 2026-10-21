@@ -165,7 +165,7 @@ class OrderResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Административные схемы: заявки, наряды и отзывы
+# Административные схемы: заявки, заказы и отзывы
 # ---------------------------------------------------------------------------
 class AdminRequestUser(BaseModel):
     """Пользователь, создавший заявку (без чувствительных данных)."""
@@ -179,7 +179,7 @@ class AdminRequestUser(BaseModel):
 
 
 class AdminWorkerRef(BaseModel):
-    """Назначенный работник (для отображения в наряде)."""
+    """Назначенный работник (для отображения в заказе)."""
 
     id: int
     user_id: int
@@ -189,7 +189,7 @@ class AdminWorkerRef(BaseModel):
 
 
 class AdminOrderResponse(OrderResponse):
-    """Наряд с раскрытыми назначенными работниками."""
+    """Заказ с раскрытыми назначенными работниками."""
 
     workers: list[AdminWorkerRef] = []
 
@@ -198,7 +198,7 @@ class AdminRequestDetailResponse(RequestResponse):
     """Полная карточка заявки для администратора.
 
     Содержит владельца заявки, статус, адрес/координаты, описание, срочность,
-    связанные наряды и назначенных работников.
+    связанные заказы и назначенных работников.
     """
 
     user: AdminRequestUser | None = None
@@ -206,7 +206,7 @@ class AdminRequestDetailResponse(RequestResponse):
 
 
 class ReviewResponse(BaseModel):
-    """Отзыв клиента по наряду (``Order.client_review``)."""
+    """Отзыв клиента по заказу (``Order.client_review``)."""
 
     order_id: int
     request_id: int
@@ -256,10 +256,10 @@ class AdminRequestStatusResponse(AdminRequestDetailResponse):
 
 
 class OrderWorkerChange(BaseModel):
-    """Назначение/замена работника, привязанного к наряду.
+    """Назначение/замена работника, привязанного к заказу.
 
     Используется существующая связь ``OrderWorker`` — новая таблица и поле не
-    создаются. Если ``replace_existing`` истинно, текущие работники наряда
+    создаются. Если ``replace_existing`` истинно, текущие работники заказа
     заменяются; иначе работник добавляется дополнительно.
     """
 
@@ -268,4 +268,4 @@ class OrderWorkerChange(BaseModel):
 
 
 class OrderWorkerResponse(AdminOrderResponse):
-    """Результат изменения работников наряда для администратора."""
+    """Результат изменения работников заказа для администратора."""

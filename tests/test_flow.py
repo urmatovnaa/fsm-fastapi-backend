@@ -217,7 +217,7 @@ async def run_flow() -> None:
         )
         assert r.status_code == 409, ("double accept", r.status_code, r.text)
 
-        # 16. Список нарядов воркера содержит созданный order
+        # 16. Список заказов воркера содержит созданный order
         r = await client.get("/api/v1/orders/work-orders", headers=worker_headers)
         assert r.status_code == 200, ("list work orders", r.status_code, r.text)
         assert any(o["id"] == order_id for o in r.json())
@@ -242,7 +242,7 @@ async def run_flow() -> None:
         assert r.status_code == 200, ("start work", r.status_code, r.text)
         assert r.json()["status"]["name"] == "IN_PROGRESS"
 
-        # 17. Завершение наряда воркером -> order COMPLETED, request COMPLETED
+        # 17. Завершение заказа воркером -> order COMPLETED, request COMPLETED
         r = await client.post(
             f"/api/v1/orders/work-orders/{order_id}/complete", headers=worker_headers
         )

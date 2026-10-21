@@ -41,7 +41,7 @@ class ScheduleNotFound(Exception):
 
 
 class InvalidSchedule(Exception):
-    """Некорректный интервал расписания или недоступная связь с нарядом."""
+    """Некорректный интервал расписания или недоступная связь с заказом."""
 
 
 async def get_user_by_id(session: AsyncSession, user_id: int) -> User | None:
@@ -174,10 +174,10 @@ async def get_worker_detail(session: AsyncSession, worker_id: int) -> Worker | N
 
 
 async def count_worker_active_orders(session: AsyncSession, worker_id: int) -> int:
-    """Загрузка работника: число незавершённых (активных) нарядов.
+    """Загрузка работника: число незавершённых (активных) заказов.
 
     Расчёт формируется сервисом из существующих данных (OrderWorker/Order/
-    Status), без новых таблиц и полей. Активным считается наряд, статус
+    Status), без новых таблиц и полей. Активным считается заказ, статус
     которого не входит в терминальный набор.
     """
     result = await session.execute(

@@ -323,9 +323,9 @@ async def get_worker(
     current_user: User = Depends(get_current_admin),
     session: AsyncSession = Depends(get_db),
 ):
-    """Профиль работника: пользователь, навыки, техника, расписание, наряды.
+    """Профиль работника: пользователь, навыки, техника, расписание, заказы.
 
-    ``workload`` — число активных (незавершённых) нарядов; рассчитывается
+    ``workload`` — число активных (незавершённых) заказов; рассчитывается
     сервисом из существующих данных OrderWorker/Order/Status.
     """
     worker = await user_service.get_worker_detail(session, worker_id)
@@ -441,7 +441,7 @@ async def list_worker_schedules(
     current_user: User = Depends(get_current_admin),
     session: AsyncSession = Depends(get_db),
 ):
-    """Записи расписания работника (интервалы времени и связанные наряды)."""
+    """Записи расписания работника (интервалы времени и связанные заказы)."""
     worker = await user_service.get_worker_by_id(session, worker_id)
     if worker is None:
         raise _not_found("Worker not found")
@@ -460,7 +460,7 @@ async def create_worker_schedule(
     current_user: User = Depends(get_current_admin),
     session: AsyncSession = Depends(get_db),
 ):
-    """Создаёт интервал расписания. Проверяются работник, интервал и наряд."""
+    """Создаёт интервал расписания. Проверяются работник, интервал и заказ."""
     try:
         return await user_service.create_schedule(
             session,
@@ -487,7 +487,7 @@ async def update_worker_schedule(
     current_user: User = Depends(get_current_admin),
     session: AsyncSession = Depends(get_db),
 ):
-    """Изменяет интервал/наряд записи расписания. Некорректный интервал -> 400."""
+    """Изменяет интервал/заказ записи расписания. Некорректный интервал -> 400."""
     try:
         return await user_service.update_schedule(
             session,
@@ -539,7 +539,7 @@ async def list_requests(
         default=None, ge=1, description="Фильтр по ID пользователя-владельца"
     ),
     worker_id: int | None = Query(
-        default=None, ge=1, description="Фильтр по ID работника, назначенного на наряд"
+        default=None, ge=1, description="Фильтр по ID работника, назначенного на заказ"
     ),
     limit: int = Query(default=50, ge=1, le=200, description="Размер страницы"),
     offset: int = Query(default=0, ge=0, description="Смещение"),
@@ -571,7 +571,7 @@ async def get_request(
     current_user: User = Depends(get_current_admin),
     session: AsyncSession = Depends(get_db),
 ):
-    """Полная информация о заявке: владелец, адрес, наряды и работники."""
+    """Полная информация о заявке: владелец, адрес, заказы и работники."""
     request = await order_service.get_admin_request(session, request_id)
     if request is None:
         raise _not_found("Request not found")
@@ -632,18 +632,18 @@ async def list_statuses(
     current_user: User = Depends(get_current_admin),
     session: AsyncSession = Depends(get_db),
 ):
-    """Существующий справочник статусов заявок/нарядов для выбора админом."""
+    """Существующий справочник статусов заявок/заказов для выбора админом."""
     statuses = await order_service.list_statuses(session)
     return [StatusResponse.model_validate(s) for s in statuses]
 
 
 # ---------------------------------------------------------------------------
-# Наряды и контроль выполнения
+# Заказы и контроль выполнения
 # ---------------------------------------------------------------------------
 @router.get(
     "/orders",
     response_model=list[AdminOrderResponse],
-    summary="Список всех нарядов",
+    summary="Список всех заказов",
 )
 async def list_orders(
     worker_id: int | None = Query(
@@ -652,14 +652,14 @@ async def list_orders(
     status_filter: str | None = Query(
         default=None,
         alias="status",
-        description="Фильтр по имени статуса наряда из справочника Status",
+        description="Фильтр по имени статуса заказа из справочника Status",
     ),
     limit: int = Query(default=50, ge=1, le=200, description="Размер страницы"),
     offset: int = Query(default=0, ge=0, description="Смещение"),
     current_user: User = Depends(get_current_admin),
     session: AsyncSession = Depends(get_db),
 ):
-    """Список нарядов с назначенными работниками (для контроля выполнения)."""
+    """Список заказов с назначенными работниками (для контроля выполнения)."""
     orders = await order_service.list_admin_orders(
         session, worker_id=worker_id, status=status_filter, limit=limit, offset=offset
     )
@@ -669,14 +669,14 @@ async def list_orders(
 @router.get(
     "/orders/{order_id}",
     response_model=AdminOrderResponse,
-    summary="Наряд по ID",
+    summary="Заказ по ID",
 )
 async def get_order(
     order_id: int,
     current_user: User = Depends(get_current_admin),
     session: AsyncSession = Depends(get_db),
 ):
-    """Данные наряда: заявка, работники, статус, чек-лист, отчёт, запчасти,
+    """Данные заказа: заявка, работники, статус, чек-лист, отчёт, запчасти,
     фотографии, стоимость и отзыв клиента (если оставлен).
     """
     order = await order_service.get_admin_order(session, order_id)
@@ -688,7 +688,7 @@ async def get_order(
 @router.put(
     "/orders/{order_id}/worker",
     response_model=OrderWorkerResponse,
-    summary="Назначить/заменить работника наряда",
+    summary="Назначить/заменить работника заказа",
 )
 async def change_order_worker(
     order_id: int,
@@ -696,10 +696,10 @@ async def change_order_worker(
     current_user: User = Depends(get_current_admin),
     session: AsyncSession = Depends(get_db),
 ):
-    """Назначает или заменяет работника, привязанного к наряду.
+    """Назначает или заменяет работника, привязанного к заказу.
 
     Используется существующая связь ``OrderWorker`` (новая таблица/поле не
-    создаются). При ``replace_existing=true`` текущие работники наряда
+    создаются). При ``replace_existing=true`` текущие работники заказа
     заменяются указанным; при ``false`` работник добавляется дополнительно.
     Расписание и прочие связанные данные не изменяются.
     """
@@ -720,7 +720,7 @@ async def change_order_worker(
 @router.delete(
     "/orders/{order_id}/worker/{worker_id}",
     response_model=OrderWorkerResponse,
-    summary="Удалить работника из наряда",
+    summary="Удалить работника из заказа",
 )
 async def remove_order_worker(
     order_id: int,
@@ -728,9 +728,9 @@ async def remove_order_worker(
     current_user: User = Depends(get_current_admin),
     session: AsyncSession = Depends(get_db),
 ):
-    """Удаляет работника из наряда (существующая связь ``OrderWorker``).
+    """Удаляет работника из заказа (существующая связь ``OrderWorker``).
 
-    Несуществующий наряд -> 404; работник не привязан к наряду -> 404.
+    Несуществующий заказ -> 404; работник не привязан к заказу -> 404.
     """
     try:
         order = await order_service.remove_order_worker(
@@ -770,14 +770,14 @@ async def list_reviews(
 @router.get(
     "/reviews/{order_id}",
     response_model=ReviewResponse,
-    summary="Отзыв по ID наряда",
+    summary="Отзыв по ID заказа",
 )
 async def get_review(
     order_id: int,
     current_user: User = Depends(get_current_admin),
     session: AsyncSession = Depends(get_db),
 ):
-    """Отзыв по конкретному наряду. Если отзыва нет -> 404."""
+    """Отзыв по конкретному заказу. Если отзыва нет -> 404."""
     order = await order_service.get_review(session, order_id)
     if order is None:
         raise _not_found("Review not found")
