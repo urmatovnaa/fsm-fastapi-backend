@@ -11,13 +11,14 @@ from app.core.constants import (
     RequestStatuses,
     is_valid_transition,
 )
-from app.models.inventory import SparePart
+from app.models.inventory import SparePart, Technic
 from app.models.orders import (
     Order,
     OrderPart,
     OrderPhoto,
     OrderWorker,
     Request,
+    RequestTechnic,
     Status,
 )
 from app.models.users import Worker
@@ -58,6 +59,14 @@ class SparePartNotFound(Exception):
     ...
 
 
+class TechnicNotFound(Exception):
+    """Указанная единица техники не найдена."""
+
+
+class OrderAlreadyCreated(Exception):
+    """По заявке уже создан заказ — изменение состава техники запрещено."""
+
+
 class WorkerNotFound(Exception):
     """Работник, который должен быть назначен на заказ, не найден."""
 
@@ -80,10 +89,11 @@ def _order_options():
 
 
 def _request_options():
-    """Связи заявки вместе со статусами её заказов."""
+    """Связи заявки вместе со статусами её заказов и составом техники."""
     return (
         selectinload(Request.status),
         selectinload(Request.orders).selectinload(Order.status),
+        selectinload(Request.technics).selectinload(RequestTechnic.technic),
     )
 
 
@@ -169,6 +179,28 @@ async def _apply_request_status(
 # ---------------------------------------------------------------------------
 # Заявки
 # ---------------------------------------------------------------------------
+async def _require_technics(
+    session: AsyncSession, technic_ids: list[int]
+) -> list[Technic]:
+    """Проверяет существование указанной техники и возвращает её записи.
+
+    Дубликаты ID игнорируются (сохраняется порядок первого появления).
+    Отсутствующая техника -> ``TechnicNotFound``.
+    """
+    if not technic_ids:
+        return []
+
+    unique_ids = list(dict.fromkeys(technic_ids))
+    result = await session.execute(
+        select(Technic).where(Technic.id.in_(unique_ids))
+    )
+    found = {t.id: t for t in result.scalars().all()}
+    missing = [tid for tid in unique_ids if tid not in found]
+    if missing:
+        raise TechnicNotFound(missing)
+    return [found[tid] for tid in unique_ids]
+
+
 async def create_request(
     session: AsyncSession,
     *,
@@ -178,9 +210,12 @@ async def create_request(
     """Создаёт заявку текущего пользователя со статусом SEARCHING_MASTER.
 
     ``user_id`` всегда берётся из авторизованного пользователя — передать
-    произвольный идентификатор через тело запроса нельзя.
+    произвольный идентификатор через тело запроса нельзя. Указанная техника
+    сохраняется через существующую связь ``RequestTechnic`` (новые таблицы/
+    поля не создаются).
     """
     status = await _require_status(session, RequestStatuses.SEARCHING_MASTER)
+    technics = await _require_technics(session, data.technic_ids)
 
     request = Request(
         user_id=user_id,
@@ -196,6 +231,8 @@ async def create_request(
         visit_time_end=data.visit_time_end,
         created_at=utc_now(),
     )
+    for technic in technics:
+        request.technics.append(RequestTechnic(technic=technic))
     session.add(request)
     await session.commit()
     return await get_request(session, request.id)
@@ -261,6 +298,62 @@ async def cancel_request(
     await _apply_request_status(
         session, request=request, target=RequestStatuses.CANCELLED
     )
+    await session.commit()
+    return await get_request(session, request_id)
+
+
+async def add_request_technics(
+    session: AsyncSession,
+    *,
+    request_id: int,
+    user_id: int,
+    technic_ids: list[int],
+) -> Request:
+    """Меняет состав техники существующей заявки пользователя.
+
+    Допустимо только пока по заявке не создан заказ (работник не назначен),
+    то есть заявка находится в статусе ``SEARCHING_MASTER`` и связанных
+    ``Order`` нет. В этом случае состав ``RequestTechnic`` заменяется на
+    переданный (сценарий А). Новый ``Order`` не создаётся.
+
+    Если заказ уже создан (работник назначен), изменение запрещено — возбуждается
+    ``OrderAlreadyCreated`` (сценарий Б): заявка не меняется, новый ``Order`` не
+    создаётся.
+    """
+    request = await get_request(session, request_id)
+    if request is None:
+        raise OrderNotFound("Request not found")
+    if request.user_id != user_id:
+        raise NotOrderOwner
+
+    # Сценарий Б: заказ уже создан (по статусу заявки или наличию Order).
+    status_name = (
+        request.status.name if request.status is not None else None
+    )
+    has_orders = len(request.orders) > 0
+    if has_orders or status_name != RequestStatuses.SEARCHING_MASTER:
+        raise OrderAlreadyCreated
+
+    technics = await _require_technics(session, technic_ids)
+
+    # Заменяем состав техники заявки (сценарий А).
+    unique_ids = list(dict.fromkeys(technic_ids))
+    desired = set(unique_ids)
+    existing_by_technic = {link.technic_id: link for link in request.technics}
+
+    # Удаляем технику, которой больше нет в новом составе.
+    for link in list(request.technics):
+        if link.technic_id not in desired:
+            request.technics.remove(link)
+            await session.delete(link)
+
+    # Добавляем отсутствующие связи (существующие не пересоздаём, чтобы не
+    # конфликтовать по составному PK request_id + technic_id).
+    by_id = {t.id: t for t in technics}
+    for technic_id in unique_ids:
+        if technic_id not in existing_by_technic:
+            request.technics.append(RequestTechnic(technic=by_id[technic_id]))
+
     await session.commit()
     return await get_request(session, request_id)
 

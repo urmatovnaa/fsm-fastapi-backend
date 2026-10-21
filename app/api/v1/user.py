@@ -20,10 +20,18 @@ from app.schemas.orders import (
     ClientReviewCreate,
     OrderResponse,
     RequestCreate,
+    RequestDetailResponse,
     RequestResponse,
+    RequestTechnicAdd,
 )
 from app.services import orders as order_service
-from app.services.orders import InvalidOrderState, NotOrderOwner, OrderNotFound
+from app.services.orders import (
+    InvalidOrderState,
+    NotOrderOwner,
+    OrderAlreadyCreated,
+    OrderNotFound,
+    TechnicNotFound,
+)
 
 router = APIRouter(prefix="/orders", tags=[TAG_USER])
 
@@ -44,7 +52,7 @@ def _conflict(detail: str = "Invalid request state") -> HTTPException:
 
 @router.post(
     "/requests",
-    response_model=RequestResponse,
+    response_model=RequestDetailResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Создать заявку",
 )
@@ -56,7 +64,9 @@ async def create_request(
     """Создаёт заявку от имени текущего пользователя.
 
     Статус заявки всегда ``SEARCHING_MASTER``. ``user_id`` берётся из токена —
-    создать заявку от имени другого пользователя нельзя.
+    создать заявку от имени другого пользователя нельзя. Можно сразу указать
+    одну или несколько единиц техники (``technic_ids``) — они сохраняются
+    через существующую связь ``RequestTechnic``.
     """
     return await run_order_action(
         order_service.create_request(
@@ -67,20 +77,63 @@ async def create_request(
 
 @router.get(
     "/requests",
-    response_model=list[RequestResponse],
+    response_model=list[RequestDetailResponse],
     summary="Список своих заявок",
 )
 async def list_requests(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    """Возвращает только заявки текущего пользователя."""
+    """Возвращает только заявки текущего пользователя (с составом техники)."""
     return await order_service.list_requests(session, user_id=current_user.id)
+
+
+@router.post(
+    "/requests/{request_id}/technics",
+    response_model=RequestDetailResponse,
+    summary="Добавить технику к заявке",
+)
+async def add_request_technics(
+    request_id: int,
+    payload: RequestTechnicAdd,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    """Добавляет/меняет технику существующей заявки пользователя.
+
+    Разрешено, только пока по заявке не создан заказ (работник не назначен,
+    статус заявки ``SEARCHING_MASTER``): состав техники заявки заменяется на
+    переданный, новый заказ не создаётся (сценарий А).
+
+    Если заказ уже создан — изменение запрещено (409), заявка не меняется и
+    новый заказ не создаётся (сценарий Б).
+    """
+    try:
+        return await order_service.add_request_technics(
+            session,
+            request_id=request_id,
+            user_id=current_user.id,
+            technic_ids=payload.technic_ids,
+        )
+    except OrderNotFound:
+        raise _not_found()
+    except NotOrderOwner:
+        raise _not_found()
+    except OrderAlreadyCreated:
+        raise _conflict(
+            "Заказ уже создан. Добавить технику к текущей заявке невозможно. "
+            "Создайте новую заявку с необходимой техникой."
+        )
+    except TechnicNotFound:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Technic not found",
+        )
 
 
 @router.get(
     "/requests/{request_id}",
-    response_model=RequestResponse,
+    response_model=RequestDetailResponse,
     summary="Детали своей заявки",
 )
 async def get_request(

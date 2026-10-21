@@ -47,6 +47,11 @@ class Request(Base):
     technics = relationship("RequestTechnic", back_populates="request")
     orders = relationship("Order", back_populates="request")
 
+    @property
+    def technic_list(self) -> list["Technic"]:
+        """Единицы техники заявки (для API-ответов; не изменяет схему БД)."""
+        return [rt.technic for rt in self.technics if rt.technic is not None]
+
 
 class RequestTechnic(Base):
     __tablename__ = "request_technics"

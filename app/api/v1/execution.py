@@ -13,9 +13,11 @@ from app.services import users as user_service
 from app.services.orders import (
     InvalidOrderState,
     NotOrderOwner,
+    OrderAlreadyCreated,
     OrderNotFound,
     SparePartNotFound,
     StatusNotFound,
+    TechnicNotFound,
 )
 
 
@@ -60,6 +62,20 @@ async def run_order_action(coro):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Spare part not found",
+        )
+    except TechnicNotFound:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Technic not found",
+        )
+    except OrderAlreadyCreated:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "The order has already been created. Adding technic to the "
+                "current request is not possible. Create a new request with "
+                "the required technic."
+            ),
         )
     except StatusNotFound:
         raise status_seed_error()

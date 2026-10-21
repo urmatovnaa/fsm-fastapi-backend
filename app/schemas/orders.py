@@ -3,6 +3,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from app.schemas.inventory import TechnicResponse
+
 
 class StatusResponse(BaseModel):
     id: int
@@ -28,6 +30,19 @@ class RequestCreate(BaseModel):
     visit_date: date | None = None
     visit_time_start: time | None = None
     visit_time_end: time | None = None
+    # Техника, необходимая для выполнения заявки (существующая связь
+    # RequestTechnic). Сохраняется без создания новых таблиц/полей.
+    technic_ids: list[int] = []
+
+
+class RequestTechnicAdd(BaseModel):
+    """Добавление техники к существующей заявке пользователя.
+
+    Используется существующая связь ``RequestTechnic``. Состав техники можно
+    менять только пока по заявке не создан заказ (работник не назначен).
+    """
+
+    technic_ids: list[int] = Field(min_length=1)
 
 
 class OrderPartCreate(BaseModel):
@@ -139,6 +154,20 @@ class RequestResponse(BaseModel):
     orders: list[OrderSummary] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class RequestDetailResponse(RequestResponse):
+    """Заявка с раскрытым составом техники (для пользователя).
+
+    Поле ``technics`` заполняется из свойства модели ``Request.technic_list``
+    (единицы техники существующей связи ``RequestTechnic``).
+    """
+
+    technics: list[TechnicResponse] = Field(
+        default_factory=list, validation_alias="technic_list"
+    )
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class OrderResponse(BaseModel):
