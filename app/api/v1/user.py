@@ -87,7 +87,8 @@ async def list_requests(
     """Возвращает только заявки текущего пользователя (с составом техники)."""
     return await order_service.list_requests(session, user_id=current_user.id)
 
-
+# FIX: эта фигня удаляет всю технику, что была добавлена 
+# изначально. Нужно только добавление.
 @router.post(
     "/requests/{request_id}/technics",
     response_model=RequestDetailResponse,
