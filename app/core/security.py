@@ -20,14 +20,17 @@ def verify_password(password: str, hashed_password: str) -> bool:
     return pwd_context.verify(password, hashed_password)
 
 
-def create_access_token(user_id: int, role: str) -> str:
-    """Формирует JWT с user_id, role и exp."""
+def create_access_token(user_id: int) -> str:
+    """Формирует JWT с user_id и exp.
+
+    Флаг администратора не кладём в токен: он берётся из БД
+    (User.is_admin), чтобы сразу отражать изменения.
+    """
     expire = datetime.now(timezone.utc) + timedelta(
         minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
     )
     payload = {
         "user_id": user_id,
-        "role": role,
         "exp": expire,
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)

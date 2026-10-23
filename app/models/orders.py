@@ -41,11 +41,16 @@ class Request(Base):
     urgency = Column(Integer, nullable=True) 
 
     # Связи
-    user = relationship("User")
+    user = relationship("User", back_populates="requests")
     status = relationship("Status", back_populates="requests")
     street = relationship("Street", back_populates="requests")
     technics = relationship("RequestTechnic", back_populates="request")
     orders = relationship("Order", back_populates="request")
+
+    @property
+    def technic_list(self) -> list["Technic"]:
+        """Единицы техники заявки (для API-ответов; не изменяет схему БД)."""
+        return [rt.technic for rt in self.technics if rt.technic is not None]
 
 
 class RequestTechnic(Base):
@@ -115,6 +120,11 @@ class OrderPart(Base):
 
     order = relationship("Order", back_populates="parts")
     spare_part = relationship("SparePart", back_populates="order_parts")
+
+    @property
+    def spare_part_name(self) -> str | None:
+        """Наименование запчасти (для API-ответов; не изменяет схему БД)."""
+        return self.spare_part.name if self.spare_part else None
 
 class OrderPhoto(Base):
     __tablename__ = "order_photos"

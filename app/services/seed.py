@@ -1,29 +1,25 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.constants import RoleNames, StatusNames
+from app.core.constants import ALL_STATUS_NAMES
 from app.models.orders import Status
-from app.models.users import Role
-
-
-async def seed_roles(session: AsyncSession) -> None:
-    existing = await session.execute(select(Role.name))
-    existing_names = {name for (name,) in existing.all()}
-    for name in RoleNames.ALL:
-        if name not in existing_names:
-            session.add(Role(name=name))
 
 
 async def seed_statuses(session: AsyncSession) -> None:
+    """Идемпотентно наполняет единую таблицу `statuses`.
+
+    Статусы заявок и заказов хранятся в одной таблице `statuses`.
+    Повторный запуск не создаёт дубликатов: уже существующие записи
+    (по имени) пропускаются.
+    """
     existing = await session.execute(select(Status.name))
     existing_names = {name for (name,) in existing.all()}
-    for name in StatusNames.ALL:
+    for name in ALL_STATUS_NAMES:
         if name not in existing_names:
             session.add(Status(name=name))
 
 
 async def seed_all(session: AsyncSession) -> None:
-    """Идемпотентный seed ролей и статусов."""
-    await seed_roles(session)
+    """Идемпотентный seed справочника статусов."""
     await seed_statuses(session)
     await session.commit()
